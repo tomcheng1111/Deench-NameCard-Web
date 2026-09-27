@@ -6,4 +6,4 @@ The site uses `https://api.namecard.deench.tw` for its API. Access to contacts r
 
 ## Publishing
 
-GitHub Pages publishes the `main` branch root at `namecard.deench.tw`. Changes to the private project's `frontend/` directory must be copied here before they appear on the site.
+GitHub Pages publishes the `main` branch root at `namecard.deench.tw`. Maintainers run `./renew.sh` from the private project's root to sync the reviewed frontend files here, deploy the API, and check GitHub Pages. GitHub Pages publishes this repository's `main` branch.
