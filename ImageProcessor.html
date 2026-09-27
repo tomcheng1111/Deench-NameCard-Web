@@ -1,0 +1,5936 @@
+<!--
+  ImageProcessor.html
+
+  Deench AI Business Card
+
+  Phase 4 + Phase 7-A
+
+  功能：
+  1. OpenCV.js
+  2. 圖片正規化
+  3. 一般矩形名片四角偵測
+  4. 切角 / 圓角 / 非完整矩形輪廓處理
+  5. 四角人工調整
+  6. Perspective Transform
+  7. 90 × 54 mm 標準比例
+  8. 左右旋轉 90°
+  9. 影像品質檢查
+  10. Contact Photo 產生
+-->
+
+<script
+  async
+  src="https://docs.opencv.org/4.x/opencv.js">
+</script>
+
+<script>
+
+(function() {
+
+  'use strict';
+
+
+  /* ==================================================
+   * Constants
+   * ================================================== */
+
+  const MAX_SOURCE_DIMENSION =
+    2200;
+
+  const DETECT_MAX_DIMENSION =
+    1400;
+
+  const QUALITY_MAX_DIMENSION =
+    1200;
+
+  const OUTPUT_LONG_EDGE =
+    1600;
+
+  const JPEG_QUALITY =
+    0.92;
+
+
+  /* ==================================================
+   * Standard Business Card
+   * ================================================== */
+
+  const STANDARD_CARD_WIDTH_MM =
+    90;
+
+  const STANDARD_CARD_HEIGHT_MM =
+    54;
+
+  const STANDARD_CARD_RATIO =
+    STANDARD_CARD_WIDTH_MM /
+    STANDARD_CARD_HEIGHT_MM;
+
+
+  /* ==================================================
+   * Detection
+   * ================================================== */
+
+  const MIN_CARD_AREA_RATIO =
+    0.06;
+
+  const MAX_POLYGON_POINTS =
+    8;
+
+  const CUT_EDGE_RATIO_LIMIT =
+    0.72;
+
+  const INTERSECTION_DISTANCE_FACTOR =
+    2.2;
+
+
+  /* ==================================================
+   * Quality
+   * ================================================== */
+
+  const BLOCK_MIN_SOURCE_SHORT_EDGE =
+    250;
+
+  const WARN_MIN_SOURCE_SHORT_EDGE =
+    500;
+
+  const BLOCK_BLUR_VARIANCE =
+    15;
+
+  const WARN_BLUR_VARIANCE =
+    55;
+
+  const WARN_DARK_BRIGHTNESS =
+    55;
+
+  const WARN_BRIGHT_BRIGHTNESS =
+    220;
+
+  const WARN_LOW_CONTRAST_STD =
+    28;
+
+
+  /* ==================================================
+   * Contact Photo
+   * ================================================== */
+
+  const CONTACT_PHOTO_SIZE =
+    1024;
+
+  /*
+   * Google Contacts 圓形顯示的安全半徑。
+   *
+   * 1024 × 0.46 ≈ 471 px
+   *
+   * 不直接使用 0.5，
+   * 保留額外安全邊界。
+   */
+  const CONTACT_PHOTO_SAFE_RADIUS_RATIO =
+    0.46;
+
+  /*
+   * 名片四角與安全圓再多保留 4% margin。
+   */
+  const CONTACT_PHOTO_MARGIN_RATIO =
+    0.96;
+
+
+  /* ==================================================
+   * State
+   * ================================================== */
+
+  const editors =
+    {};
+
+
+  /* ==================================================
+   * OpenCV
+   * ================================================== */
+
+  function isOpenCvReady() {
+
+    return (
+      typeof cv !== 'undefined' &&
+      cv &&
+      typeof cv.imread === 'function'
+    );
+
+  }
+
+
+  async function waitForOpenCV(
+    timeoutMs
+  ) {
+
+    const timeout =
+      timeoutMs ||
+      15000;
+
+
+    const start =
+      Date.now();
+
+
+    while (
+      !isOpenCvReady()
+    ) {
+
+      if (
+        Date.now() -
+        start >
+        timeout
+      ) {
+
+        throw new Error(
+          'OpenCV 載入逾時，請重新整理頁面後再試。'
+        );
+
+      }
+
+
+      await sleep(
+        100
+      );
+
+    }
+
+
+    return true;
+
+  }
+
+
+  function sleep(
+    ms
+  ) {
+
+    return new Promise(
+      function(resolve) {
+
+        setTimeout(
+          resolve,
+          ms
+        );
+
+      }
+    );
+
+  }
+
+
+  /* ==================================================
+   * Image Loader
+   * ================================================== */
+
+  function loadHtmlImage(
+    dataUrl
+  ) {
+
+    return new Promise(
+      function(
+        resolve,
+        reject
+      ) {
+
+        const image =
+          new Image();
+
+
+        image.onload =
+          function() {
+
+            resolve(
+              image
+            );
+
+          };
+
+
+        image.onerror =
+          function() {
+
+            reject(
+              new Error(
+                '圖片載入失敗。'
+              )
+            );
+
+          };
+
+
+        image.src =
+          dataUrl;
+
+      }
+    );
+
+  }
+
+
+  /* ==================================================
+   * Normalize
+   * ================================================== */
+
+  async function normalizeSourceImage(
+    dataUrl
+  ) {
+
+    const image =
+      await loadHtmlImage(
+        dataUrl
+      );
+
+
+    const originalWidth =
+      image.naturalWidth ||
+      image.width;
+
+
+    const originalHeight =
+      image.naturalHeight ||
+      image.height;
+
+
+    if (
+      !originalWidth ||
+      !originalHeight
+    ) {
+
+      throw new Error(
+        '無法取得圖片尺寸。'
+      );
+
+    }
+
+
+    let width =
+      originalWidth;
+
+    let height =
+      originalHeight;
+
+
+    const maxDimension =
+      Math.max(
+        width,
+        height
+      );
+
+
+    if (
+      maxDimension >
+      MAX_SOURCE_DIMENSION
+    ) {
+
+      const ratio =
+        MAX_SOURCE_DIMENSION /
+        maxDimension;
+
+
+      width =
+        Math.round(
+          width *
+          ratio
+        );
+
+
+      height =
+        Math.round(
+          height *
+          ratio
+        );
+
+    }
+
+
+    const canvas =
+      document.createElement(
+        'canvas'
+      );
+
+
+    canvas.width =
+      width;
+
+    canvas.height =
+      height;
+
+
+    const ctx =
+      canvas.getContext(
+        '2d',
+        {
+          alpha:
+            false
+        }
+      );
+
+
+    ctx.drawImage(
+      image,
+      0,
+      0,
+      width,
+      height
+    );
+
+
+    return {
+
+      dataUrl:
+        canvas.toDataURL(
+          'image/jpeg',
+          0.95
+        ),
+
+      width:
+        width,
+
+      height:
+        height,
+
+      originalWidth:
+        originalWidth,
+
+      originalHeight:
+        originalHeight
+
+    };
+
+  }
+
+
+  /* ==================================================
+   * Public Detection
+   * ================================================== */
+
+  async function detectCardCorners(
+    dataUrl
+  ) {
+
+    await waitForOpenCV();
+
+
+    const normalized =
+      await normalizeSourceImage(
+        dataUrl
+      );
+
+
+    const result =
+      await detectCardCornersOnNormalized_(
+        normalized.dataUrl
+      );
+
+
+    result.sourceDataUrl =
+      normalized.dataUrl;
+
+
+    result.width =
+      normalized.width;
+
+
+    result.height =
+      normalized.height;
+
+
+    return result;
+
+  }
+
+
+  async function redetectCardCorners(
+    dataUrl
+  ) {
+
+    await waitForOpenCV();
+
+
+    const result =
+      await detectCardCornersOnNormalized_(
+        dataUrl
+      );
+
+
+    result.sourceDataUrl =
+      dataUrl;
+
+
+    return result;
+
+  }
+
+
+  /* ==================================================
+   * Main Detection
+   * ================================================== */
+
+  async function detectCardCornersOnNormalized_(
+    dataUrl
+  ) {
+
+    const image =
+      await loadHtmlImage(
+        dataUrl
+      );
+
+
+    const sourceWidth =
+      image.naturalWidth;
+
+
+    const sourceHeight =
+      image.naturalHeight;
+
+
+    let detectWidth =
+      sourceWidth;
+
+
+    let detectHeight =
+      sourceHeight;
+
+
+    const maxDimension =
+      Math.max(
+        detectWidth,
+        detectHeight
+      );
+
+
+    if (
+      maxDimension >
+      DETECT_MAX_DIMENSION
+    ) {
+
+      const ratio =
+        DETECT_MAX_DIMENSION /
+        maxDimension;
+
+
+      detectWidth =
+        Math.round(
+          detectWidth *
+          ratio
+        );
+
+
+      detectHeight =
+        Math.round(
+          detectHeight *
+          ratio
+        );
+
+    }
+
+
+    const canvas =
+      document.createElement(
+        'canvas'
+      );
+
+
+    canvas.width =
+      detectWidth;
+
+    canvas.height =
+      detectHeight;
+
+
+    const ctx =
+      canvas.getContext(
+        '2d',
+        {
+          alpha:
+            false
+        }
+      );
+
+
+    ctx.drawImage(
+      image,
+      0,
+      0,
+      detectWidth,
+      detectHeight
+    );
+
+
+    let src =
+      null;
+
+    let gray =
+      null;
+
+    let blurred =
+      null;
+
+    let edges =
+      null;
+
+    let contours =
+      null;
+
+    let hierarchy =
+      null;
+
+
+    try {
+
+      src =
+        cv.imread(
+          canvas
+        );
+
+
+      gray =
+        new cv.Mat();
+
+
+      blurred =
+        new cv.Mat();
+
+
+      edges =
+        new cv.Mat();
+
+
+      contours =
+        new cv.MatVector();
+
+
+      hierarchy =
+        new cv.Mat();
+
+
+      cv.cvtColor(
+        src,
+        gray,
+        cv.COLOR_RGBA2GRAY
+      );
+
+
+      cv.GaussianBlur(
+        gray,
+        blurred,
+        new cv.Size(
+          5,
+          5
+        ),
+        0,
+        0,
+        cv.BORDER_DEFAULT
+      );
+
+
+      cv.Canny(
+        blurred,
+        edges,
+        50,
+        160
+      );
+
+
+      const kernel =
+        cv.Mat.ones(
+          3,
+          3,
+          cv.CV_8U
+        );
+
+
+      cv.dilate(
+        edges,
+        edges,
+        kernel
+      );
+
+
+      kernel.delete();
+
+
+      cv.findContours(
+        edges,
+        contours,
+        hierarchy,
+        cv.RETR_LIST,
+        cv.CHAIN_APPROX_SIMPLE
+      );
+
+
+      const imageArea =
+        detectWidth *
+        detectHeight;
+
+
+      const candidates =
+        [];
+
+
+      for (
+        let i = 0;
+        i < contours.size();
+        i++
+      ) {
+
+        const contour =
+          contours.get(
+            i
+          );
+
+
+        try {
+
+          const area =
+            Math.abs(
+              cv.contourArea(
+                contour
+              )
+            );
+
+
+          if (
+            area <
+            imageArea *
+            MIN_CARD_AREA_RATIO
+          ) {
+
+            continue;
+
+          }
+
+
+          const candidate =
+            buildCandidateFromContour_(
+              contour,
+              area,
+              imageArea,
+              detectWidth,
+              detectHeight
+            );
+
+
+          if (
+            candidate
+          ) {
+
+            candidates.push(
+              candidate
+            );
+
+          }
+
+        } finally {
+
+          contour.delete();
+
+        }
+
+      }
+
+
+      candidates.sort(
+        function(
+          a,
+          b
+        ) {
+
+          return (
+            b.score -
+            a.score
+          );
+
+        }
+      );
+
+
+      let resultPoints;
+
+      let detected =
+        false;
+
+      let detectionMethod =
+        'fallback';
+
+
+      if (
+        candidates.length >
+        0
+      ) {
+
+        resultPoints =
+          candidates[0]
+            .points;
+
+
+        detected =
+          true;
+
+
+        detectionMethod =
+          candidates[0]
+            .method;
+
+      } else {
+
+        resultPoints =
+          fallbackCorners(
+            detectWidth,
+            detectHeight
+          );
+
+      }
+
+
+      const scaleX =
+        sourceWidth /
+        detectWidth;
+
+
+      const scaleY =
+        sourceHeight /
+        detectHeight;
+
+
+      const scaledPoints =
+        resultPoints.map(
+          function(point) {
+
+            return {
+
+              x:
+                point.x *
+                scaleX,
+
+              y:
+                point.y *
+                scaleY
+
+            };
+
+          }
+        );
+
+
+      return {
+
+        detected:
+          detected,
+
+        detectionMethod:
+          detectionMethod,
+
+        corners:
+          orderCorners(
+            scaledPoints
+          ),
+
+        width:
+          sourceWidth,
+
+        height:
+          sourceHeight
+
+      };
+
+
+    } finally {
+
+      if (src) {
+        src.delete();
+      }
+
+
+      if (gray) {
+        gray.delete();
+      }
+
+
+      if (blurred) {
+        blurred.delete();
+      }
+
+
+      if (edges) {
+        edges.delete();
+      }
+
+
+      if (contours) {
+        contours.delete();
+      }
+
+
+      if (hierarchy) {
+        hierarchy.delete();
+      }
+
+    }
+
+  }
+
+
+  /* ==================================================
+   * Build Candidate
+   * ================================================== */
+
+  function buildCandidateFromContour_(
+    contour,
+    area,
+    imageArea,
+    imageWidth,
+    imageHeight
+  ) {
+
+    const perimeter =
+      cv.arcLength(
+        contour,
+        true
+      );
+
+
+    const epsilonList = [
+      0.015,
+      0.020,
+      0.025,
+      0.030,
+      0.040
+    ];
+
+
+    let bestCandidate =
+      null;
+
+
+    for (
+      let e = 0;
+      e < epsilonList.length;
+      e++
+    ) {
+
+      const approx =
+        new cv.Mat();
+
+
+      try {
+
+        cv.approxPolyDP(
+          contour,
+          approx,
+          perimeter *
+          epsilonList[e],
+          true
+        );
+
+
+        const pointCount =
+          approx.rows;
+
+
+        if (
+          pointCount <
+          4 ||
+          pointCount >
+          MAX_POLYGON_POINTS
+        ) {
+
+          continue;
+
+        }
+
+
+        const polygon =
+          extractCvPoints(
+            approx
+          );
+
+
+        let quad =
+          null;
+
+        let method =
+          null;
+
+        let methodWeight =
+          1;
+
+
+        if (
+          pointCount ===
+          4
+        ) {
+
+          quad =
+            polygon;
+
+
+          method =
+            'exact_quad';
+
+
+          methodWeight =
+            1.20;
+
+        }
+
+
+        if (
+          pointCount >
+          4
+        ) {
+
+          const reduced =
+            reducePolygonToQuad_(
+              polygon,
+              imageWidth,
+              imageHeight
+            );
+
+
+          if (
+            reduced
+          ) {
+
+            quad =
+              reduced;
+
+
+            method =
+              'extended_edges';
+
+            methodWeight =
+              1.10;
+
+          }
+
+        }
+
+
+        if (
+          !quad
+        ) {
+
+          continue;
+
+        }
+
+
+        const ordered =
+          orderCorners(
+            quad
+          );
+
+
+        if (
+          !isReasonableQuad_(
+            ordered,
+            imageWidth,
+            imageHeight
+          )
+        ) {
+
+          continue;
+
+        }
+
+
+        const score =
+          calculateCardCandidateScore_(
+            ordered,
+            area,
+            imageArea
+          ) *
+          methodWeight;
+
+
+        if (
+          !bestCandidate ||
+          score >
+          bestCandidate.score
+        ) {
+
+          bestCandidate = {
+
+            points:
+              ordered,
+
+            method:
+              method,
+
+            score:
+              score,
+
+            area:
+              area
+
+          };
+
+        }
+
+      } finally {
+
+        approx.delete();
+
+      }
+
+    }
+
+
+    if (
+      bestCandidate
+    ) {
+
+      return bestCandidate;
+
+    }
+
+
+    try {
+
+      const rect =
+        cv.minAreaRect(
+          contour
+        );
+
+
+      const rectPoints =
+        getRotatedRectPoints_(
+          rect
+        );
+
+
+      if (
+        rectPoints &&
+        rectPoints.length === 4
+      ) {
+
+        const ordered =
+          orderCorners(
+            rectPoints
+          );
+
+
+        if (
+          isReasonableQuad_(
+            ordered,
+            imageWidth,
+            imageHeight
+          )
+        ) {
+
+          return {
+
+            points:
+              ordered,
+
+            method:
+              'min_area_rect',
+
+            score:
+              calculateCardCandidateScore_(
+                ordered,
+                area,
+                imageArea
+              ) *
+              0.75,
+
+            area:
+              area
+
+          };
+
+        }
+
+      }
+
+    } catch (error) {
+
+      // Ignore fallback error.
+
+    }
+
+
+    return null;
+
+  }
+
+
+  /* ==================================================
+   * Special Shape Reduction
+   * ================================================== */
+
+  function reducePolygonToQuad_(
+    inputPoints,
+    imageWidth,
+    imageHeight
+  ) {
+
+    let points =
+      inputPoints.map(
+        function(point) {
+
+          return {
+
+            x:
+              Number(
+                point.x
+              ),
+
+            y:
+              Number(
+                point.y
+              )
+
+          };
+
+        }
+      );
+
+
+    if (
+      points.length < 4 ||
+      points.length >
+      MAX_POLYGON_POINTS
+    ) {
+
+      return null;
+
+    }
+
+
+    let safety =
+      0;
+
+
+    while (
+      points.length >
+      4 &&
+      safety <
+      10
+    ) {
+
+      safety++;
+
+
+      const lengths =
+        polygonEdgeLengths_(
+          points
+        );
+
+
+      const sortedLengths =
+        lengths
+          .slice()
+          .sort(
+            function(
+              a,
+              b
+            ) {
+
+              return (
+                a -
+                b
+              );
+
+            }
+          );
+
+
+      const median =
+        median_(
+          sortedLengths
+        );
+
+
+      let shortestIndex =
+        0;
+
+
+      for (
+        let i = 1;
+        i < lengths.length;
+        i++
+      ) {
+
+        if (
+          lengths[i] <
+          lengths[
+            shortestIndex
+          ]
+        ) {
+
+          shortestIndex =
+            i;
+
+        }
+
+      }
+
+
+      const shortestLength =
+        lengths[
+          shortestIndex
+        ];
+
+
+      const limit =
+        points.length === 5
+          ? 0.80
+          : CUT_EDGE_RATIO_LIMIT;
+
+
+      if (
+        !median ||
+        shortestLength >
+        median *
+        limit
+      ) {
+
+        return null;
+
+      }
+
+
+      const rotated =
+        rotatePolygonForEdge_(
+          points,
+          shortestIndex
+        );
+
+
+      if (
+        rotated.length <
+        4
+      ) {
+
+        return null;
+
+      }
+
+
+      const theoreticalCorner =
+        lineIntersection_(
+          rotated[0],
+          rotated[1],
+          rotated[2],
+          rotated[3]
+        );
+
+
+      if (
+        !theoreticalCorner
+      ) {
+
+        return null;
+
+      }
+
+
+      const maxReasonableDistance =
+        median *
+        INTERSECTION_DISTANCE_FACTOR;
+
+
+      const d1 =
+        distance(
+          theoreticalCorner,
+          rotated[1]
+        );
+
+
+      const d2 =
+        distance(
+          theoreticalCorner,
+          rotated[2]
+        );
+
+
+      if (
+        d1 >
+        maxReasonableDistance ||
+        d2 >
+        maxReasonableDistance
+      ) {
+
+        return null;
+
+      }
+
+
+      if (
+        theoreticalCorner.x <
+          -imageWidth * 0.25 ||
+        theoreticalCorner.x >
+          imageWidth * 1.25 ||
+        theoreticalCorner.y <
+          -imageHeight * 0.25 ||
+        theoreticalCorner.y >
+          imageHeight * 1.25
+      ) {
+
+        return null;
+
+      }
+
+
+      const newPoints = [
+
+        rotated[0],
+
+        theoreticalCorner
+
+      ];
+
+
+      for (
+        let i = 3;
+        i < rotated.length;
+        i++
+      ) {
+
+        newPoints.push(
+          rotated[i]
+        );
+
+      }
+
+
+      points =
+        newPoints;
+
+    }
+
+
+    if (
+      points.length !==
+      4
+    ) {
+
+      return null;
+
+    }
+
+
+    return orderCorners(
+      points
+    );
+
+  }
+
+
+  function polygonEdgeLengths_(
+    points
+  ) {
+
+    const result =
+      [];
+
+
+    for (
+      let i = 0;
+      i < points.length;
+      i++
+    ) {
+
+      const next =
+        (
+          i +
+          1
+        ) %
+        points.length;
+
+
+      result.push(
+        distance(
+          points[i],
+          points[next]
+        )
+      );
+
+    }
+
+
+    return result;
+
+  }
+
+
+  function rotatePolygonForEdge_(
+    points,
+    edgeIndex
+  ) {
+
+    const n =
+      points.length;
+
+
+    const start =
+      (
+        edgeIndex -
+        1 +
+        n
+      ) %
+      n;
+
+
+    const result =
+      [];
+
+
+    for (
+      let i = 0;
+      i < n;
+      i++
+    ) {
+
+      result.push(
+        points[
+          (
+            start +
+            i
+          ) %
+          n
+        ]
+      );
+
+    }
+
+
+    return result;
+
+  }
+
+
+  /* ==================================================
+   * Line Intersection
+   * ================================================== */
+
+  function lineIntersection_(
+    p1,
+    p2,
+    p3,
+    p4
+  ) {
+
+    const x1 =
+      p1.x;
+
+    const y1 =
+      p1.y;
+
+    const x2 =
+      p2.x;
+
+    const y2 =
+      p2.y;
+
+    const x3 =
+      p3.x;
+
+    const y3 =
+      p3.y;
+
+    const x4 =
+      p4.x;
+
+    const y4 =
+      p4.y;
+
+
+    const denominator =
+      (
+        x1 -
+        x2
+      ) *
+      (
+        y3 -
+        y4
+      ) -
+      (
+        y1 -
+        y2
+      ) *
+      (
+        x3 -
+        x4
+      );
+
+
+    if (
+      Math.abs(
+        denominator
+      ) <
+      0.0001
+    ) {
+
+      return null;
+
+    }
+
+
+    const a =
+      (
+        x1 *
+        y2 -
+        y1 *
+        x2
+      );
+
+
+    const b =
+      (
+        x3 *
+        y4 -
+        y3 *
+        x4
+      );
+
+
+    const px =
+      (
+        a *
+        (
+          x3 -
+          x4
+        ) -
+        (
+          x1 -
+          x2
+        ) *
+        b
+      ) /
+      denominator;
+
+
+    const py =
+      (
+        a *
+        (
+          y3 -
+          y4
+        ) -
+        (
+          y1 -
+          y2
+        ) *
+        b
+      ) /
+      denominator;
+
+
+    if (
+      !Number.isFinite(
+        px
+      ) ||
+      !Number.isFinite(
+        py
+      )
+    ) {
+
+      return null;
+
+    }
+
+
+    return {
+
+      x:
+        px,
+
+      y:
+        py
+
+    };
+
+  }
+
+
+  /* ==================================================
+   * minAreaRect Points
+   * ================================================== */
+
+  function getRotatedRectPoints_(
+    rect
+  ) {
+
+    if (
+      typeof cv.RotatedRect !==
+        'undefined' &&
+      typeof cv.RotatedRect.points ===
+        'function'
+    ) {
+
+      const pts =
+        cv.RotatedRect.points(
+          rect
+        );
+
+
+      return pts.map(
+        function(point) {
+
+          return {
+
+            x:
+              point.x,
+
+            y:
+              point.y
+
+          };
+
+        }
+      );
+
+    }
+
+
+    if (
+      !rect ||
+      !rect.center ||
+      !rect.size
+    ) {
+
+      return null;
+
+    }
+
+
+    const centerX =
+      rect.center.x;
+
+
+    const centerY =
+      rect.center.y;
+
+
+    const width =
+      rect.size.width;
+
+
+    const height =
+      rect.size.height;
+
+
+    const angle =
+      (
+        rect.angle ||
+        0
+      ) *
+      Math.PI /
+      180;
+
+
+    const cos =
+      Math.cos(
+        angle
+      );
+
+
+    const sin =
+      Math.sin(
+        angle
+      );
+
+
+    const halfWidth =
+      width /
+      2;
+
+
+    const halfHeight =
+      height /
+      2;
+
+
+    const local = [
+
+      {
+        x:
+          -halfWidth,
+
+        y:
+          -halfHeight
+      },
+
+      {
+        x:
+          halfWidth,
+
+        y:
+          -halfHeight
+      },
+
+      {
+        x:
+          halfWidth,
+
+        y:
+          halfHeight
+      },
+
+      {
+        x:
+          -halfWidth,
+
+        y:
+          halfHeight
+      }
+
+    ];
+
+
+    return local.map(
+      function(point) {
+
+        return {
+
+          x:
+            centerX +
+            point.x *
+            cos -
+            point.y *
+            sin,
+
+          y:
+            centerY +
+            point.x *
+            sin +
+            point.y *
+            cos
+
+        };
+
+      }
+    );
+
+  }
+
+
+  /* ==================================================
+   * Candidate Validation
+   * ================================================== */
+
+  function isReasonableQuad_(
+    points,
+    imageWidth,
+    imageHeight
+  ) {
+
+    if (
+      !points ||
+      points.length !==
+      4
+    ) {
+
+      return false;
+
+    }
+
+
+    for (
+      let i = 0;
+      i < points.length;
+      i++
+    ) {
+
+      const point =
+        points[i];
+
+
+      if (
+        !Number.isFinite(
+          point.x
+        ) ||
+        !Number.isFinite(
+          point.y
+        )
+      ) {
+
+        return false;
+
+      }
+
+
+      if (
+        point.x <
+          -imageWidth * 0.3 ||
+        point.x >
+          imageWidth * 1.3 ||
+        point.y <
+          -imageHeight * 0.3 ||
+        point.y >
+          imageHeight * 1.3
+      ) {
+
+        return false;
+
+      }
+
+    }
+
+
+    const geometry =
+      calculatePerspectiveGeometry_(
+        points
+      );
+
+
+    if (
+      geometry.sourceShortEdge <
+      30
+    ) {
+
+      return false;
+
+    }
+
+
+    if (
+      geometry.geometricRatio <
+      1.05 ||
+      geometry.geometricRatio >
+      4.0
+    ) {
+
+      return false;
+
+    }
+
+
+    return true;
+
+  }
+
+
+  /* ==================================================
+   * Candidate Score
+   * ================================================== */
+
+  function calculateCardCandidateScore_(
+    points,
+    area,
+    imageArea
+  ) {
+
+    const geometry =
+      calculatePerspectiveGeometry_(
+        points
+      );
+
+
+    if (
+      geometry.geometricWidth <= 0 ||
+      geometry.geometricHeight <= 0
+    ) {
+
+      return 0;
+
+    }
+
+
+    const areaScore =
+      area /
+      imageArea;
+
+
+    let ratioScore =
+      1;
+
+
+    if (
+      geometry.geometricRatio >=
+        1.20 &&
+      geometry.geometricRatio <=
+        2.60
+    ) {
+
+      ratioScore =
+        1.25;
+
+    }
+
+
+    return (
+      areaScore *
+      ratioScore
+    );
+
+  }
+
+
+  /* ==================================================
+   * CV Point Extraction
+   * ================================================== */
+
+  function extractCvPoints(
+    mat
+  ) {
+
+    const points =
+      [];
+
+
+    for (
+      let i = 0;
+      i < mat.rows;
+      i++
+    ) {
+
+      points.push({
+
+        x:
+          mat.data32S[
+            i * 2
+          ],
+
+        y:
+          mat.data32S[
+            i * 2 + 1
+          ]
+
+      });
+
+    }
+
+
+    return points;
+
+  }
+
+  /* ==================================================
+   * Fallback
+   * ================================================== */
+
+  function fallbackCorners(
+    width,
+    height
+  ) {
+
+    const marginX =
+      width *
+      0.08;
+
+
+    const marginY =
+      height *
+      0.08;
+
+
+    return [
+
+      {
+        x:
+          marginX,
+
+        y:
+          marginY
+      },
+
+      {
+        x:
+          width -
+          marginX,
+
+        y:
+          marginY
+      },
+
+      {
+        x:
+          width -
+          marginX,
+
+        y:
+          height -
+          marginY
+      },
+
+      {
+        x:
+          marginX,
+
+        y:
+          height -
+          marginY
+      }
+
+    ];
+
+  }
+
+
+  /* ==================================================
+   * Corner Ordering
+   * ================================================== */
+
+  function orderCorners(
+    points
+  ) {
+
+    if (
+      !Array.isArray(
+        points
+      ) ||
+      points.length !==
+      4
+    ) {
+
+      throw new Error(
+        '四角資料格式錯誤。'
+      );
+
+    }
+
+
+    const normalized =
+      points.map(
+        function(point) {
+
+          return {
+
+            x:
+              Number(
+                point.x
+              ),
+
+            y:
+              Number(
+                point.y
+              )
+
+          };
+
+        }
+      );
+
+
+    let tl =
+      null;
+
+    let tr =
+      null;
+
+    let br =
+      null;
+
+    let bl =
+      null;
+
+
+    let minSum =
+      Infinity;
+
+    let maxSum =
+      -Infinity;
+
+    let minDiff =
+      Infinity;
+
+    let maxDiff =
+      -Infinity;
+
+
+    normalized.forEach(
+      function(point) {
+
+        const sum =
+          point.x +
+          point.y;
+
+
+        const diff =
+          point.y -
+          point.x;
+
+
+        if (
+          sum <
+          minSum
+        ) {
+
+          minSum =
+            sum;
+
+          tl =
+            point;
+
+        }
+
+
+        if (
+          sum >
+          maxSum
+        ) {
+
+          maxSum =
+            sum;
+
+          br =
+            point;
+
+        }
+
+
+        if (
+          diff <
+          minDiff
+        ) {
+
+          minDiff =
+            diff;
+
+          tr =
+            point;
+
+        }
+
+
+        if (
+          diff >
+          maxDiff
+        ) {
+
+          maxDiff =
+            diff;
+
+          bl =
+            point;
+
+        }
+
+      }
+    );
+
+
+    return [
+      tl,
+      tr,
+      br,
+      bl
+    ];
+
+  }
+
+
+  /* ==================================================
+   * Corner Editor
+   * ================================================== */
+
+  async function createCornerEditor(
+    options
+  ) {
+
+    const canvas =
+      document.getElementById(
+        options.canvasId
+      );
+
+
+    if (
+      !canvas
+    ) {
+
+      throw new Error(
+        '找不到裁切 Canvas。'
+      );
+
+    }
+
+
+    const image =
+      await loadHtmlImage(
+        options.sourceDataUrl
+      );
+
+
+    const sourceWidth =
+      image.naturalWidth;
+
+
+    const sourceHeight =
+      image.naturalHeight;
+
+
+    const isMobile =
+      window.matchMedia &&
+      window.matchMedia(
+        '(max-width: 768px)'
+      ).matches;
+
+
+    const viewportWidth =
+      Math.max(
+        280,
+        Math.min(
+          window.innerWidth || 760,
+          760
+        )
+      );
+
+
+    const maxDisplayWidth =
+      options.maxDisplayWidth ||
+      (
+        isMobile
+          ? Math.max(
+              260,
+              viewportWidth - 40
+            )
+          : 760
+      );
+
+
+    const maxDisplayHeight =
+      options.maxDisplayHeight ||
+      (
+        isMobile
+          ? Math.max(
+              280,
+              Math.round(
+                (
+                  window.innerHeight ||
+                  700
+                ) *
+                0.58
+              )
+            )
+          : 520
+      );
+
+
+    const scale =
+      Math.min(
+        maxDisplayWidth /
+        sourceWidth,
+
+        maxDisplayHeight /
+        sourceHeight,
+
+        1
+      );
+
+
+    const displayWidth =
+      Math.round(
+        sourceWidth *
+        scale
+      );
+
+
+    const displayHeight =
+      Math.round(
+        sourceHeight *
+        scale
+      );
+
+
+    canvas.width =
+      displayWidth;
+
+
+    canvas.height =
+      displayHeight;
+
+
+    canvas.style.width =
+      displayWidth +
+      'px';
+
+
+    canvas.style.height =
+      displayHeight +
+      'px';
+
+
+    canvas.style.maxWidth =
+      '100%';
+
+
+    canvas.style.touchAction =
+      'none';
+
+
+    const editor = {
+
+      canvas:
+        canvas,
+
+      ctx:
+        canvas.getContext(
+          '2d'
+        ),
+
+      image:
+        image,
+
+      sourceDataUrl:
+        options.sourceDataUrl,
+
+      sourceWidth:
+        sourceWidth,
+
+      sourceHeight:
+        sourceHeight,
+
+      displayWidth:
+        displayWidth,
+
+      displayHeight:
+        displayHeight,
+
+      scaleX:
+        displayWidth /
+        sourceWidth,
+
+      scaleY:
+        displayHeight /
+        sourceHeight,
+
+      points:
+        orderCorners(
+          options.corners
+        ),
+
+      activePointIndex:
+        -1,
+
+      dragStartClientX:
+        0,
+
+      dragStartClientY:
+        0,
+
+      dragStartPoint:
+        null,
+
+      zoomRegion:
+        null,
+
+      pointRadius:
+        isMobile
+          ? 8
+          : 10,
+
+      isMobile:
+        isMobile,
+
+      handleOffsetCss:
+        isMobile
+          ? 64
+          : 44,
+
+      handleRadiusCss:
+        isMobile
+          ? 18
+          : 14,
+
+      hitRadiusCss:
+        isMobile
+          ? 34
+          : 28,
+
+      magnifier:
+        createMagnifierCanvas_(
+          canvas
+        )
+
+    };
+
+
+    editors[
+      options.canvasId
+    ] =
+      editor;
+
+
+    bindEditorEvents(
+      editor
+    );
+
+
+    drawEditor(
+      editor
+    );
+
+
+    return editor;
+
+  }
+
+
+  function createMagnifierCanvas_(
+    canvas
+  ) {
+
+    const id =
+      canvas.id +
+      '_magnifier';
+
+
+    let magnifier =
+      document.getElementById(
+        id
+      );
+
+
+    if (
+      !magnifier
+    ) {
+
+      magnifier =
+        document.createElement(
+          'canvas'
+        );
+
+
+      magnifier.id =
+        id;
+
+
+      magnifier.className =
+        'crop-magnifier-canvas';
+
+
+      magnifier.width =
+        312;
+
+
+      magnifier.height =
+        312;
+
+
+      document.body.appendChild(
+        magnifier
+      );
+
+    }
+
+
+    magnifier.style.display =
+      'none';
+
+
+    return magnifier;
+
+  }
+
+
+  function setEditorCorners(
+    canvasId,
+    corners
+  ) {
+
+    const editor =
+      editors[
+        canvasId
+      ];
+
+
+    if (
+      !editor
+    ) {
+
+      throw new Error(
+        '找不到裁切編輯器。'
+      );
+
+    }
+
+
+    editor.points =
+      orderCorners(
+        corners
+      );
+
+
+    drawEditor(
+      editor
+    );
+
+  }
+
+
+  function getEditorCorners(
+    canvasId
+  ) {
+
+    const editor =
+      editors[
+        canvasId
+      ];
+
+
+    if (
+      !editor
+    ) {
+
+      throw new Error(
+        '找不到裁切狀態。'
+      );
+
+    }
+
+
+    return orderCorners(
+      editor.points
+    );
+
+  }
+
+
+  function bindEditorEvents(
+    editor
+  ) {
+
+    const canvas =
+      editor.canvas;
+
+
+    canvas.onpointerdown =
+      function(event) {
+
+        event.preventDefault();
+
+
+        const point =
+          getPointerPosition(
+            editor,
+            event
+          );
+
+
+        editor.activePointIndex =
+          findNearestCorner_(
+            editor,
+            point.x,
+            point.y
+          );
+
+
+        if (
+          editor.activePointIndex < 0
+        ) {
+
+          return;
+
+        }
+
+
+        editor.dragStartClientX =
+          event.clientX;
+
+
+        editor.dragStartClientY =
+          event.clientY;
+
+
+        editor.dragStartPoint = {
+          x:
+            editor.points[
+              editor.activePointIndex
+            ].x,
+          y:
+            editor.points[
+              editor.activePointIndex
+            ].y
+        };
+
+
+        editor.zoomRegion =
+          createCornerZoomRegion_(
+            editor,
+            editor.activePointIndex
+          );
+
+
+        try {
+
+          canvas.setPointerCapture(
+            event.pointerId
+          );
+
+        } catch (error) {
+
+          // Ignore.
+
+        }
+
+
+        drawEditor(
+          editor
+        );
+
+      };
+
+
+    canvas.onpointermove =
+      function(event) {
+
+        if (
+          editor.activePointIndex < 0 ||
+          !editor.dragStartPoint ||
+          !editor.zoomRegion
+        ) {
+
+          return;
+
+        }
+
+
+        event.preventDefault();
+
+
+        const rect =
+          canvas.getBoundingClientRect();
+
+
+        const sourcePerCssX =
+          editor.zoomRegion.width /
+          Math.max(
+            1,
+            rect.width
+          );
+
+
+        const sourcePerCssY =
+          editor.zoomRegion.height /
+          Math.max(
+            1,
+            rect.height
+          );
+
+
+        const deltaX =
+          (
+            event.clientX -
+            editor.dragStartClientX
+          ) *
+          sourcePerCssX;
+
+
+        const deltaY =
+          (
+            event.clientY -
+            editor.dragStartClientY
+          ) *
+          sourcePerCssY;
+
+
+        editor.points[
+          editor.activePointIndex
+        ] = {
+          x:
+            clamp(
+              editor.dragStartPoint.x +
+              deltaX,
+              0,
+              editor.sourceWidth
+            ),
+          y:
+            clamp(
+              editor.dragStartPoint.y +
+              deltaY,
+              0,
+              editor.sourceHeight
+            )
+        };
+
+
+        drawEditor(
+          editor
+        );
+
+      };
+
+
+    canvas.onpointerup =
+      function(event) {
+
+        finishCornerDrag_(
+          editor,
+          event
+        );
+
+      };
+
+
+    canvas.onpointercancel =
+      function(event) {
+
+        finishCornerDrag_(
+          editor,
+          event
+        );
+
+      };
+
+  }
+
+
+  function finishCornerDrag_(
+    editor,
+    event
+  ) {
+
+    editor.activePointIndex =
+      -1;
+
+
+    editor.dragStartPoint =
+      null;
+
+
+    editor.zoomRegion =
+      null;
+
+
+    hideMagnifier_(
+      editor
+    );
+
+
+    drawEditor(
+      editor
+    );
+
+
+    if (
+      event &&
+      typeof event.pointerId !==
+        'undefined'
+    ) {
+
+      try {
+
+        editor.canvas
+          .releasePointerCapture(
+            event.pointerId
+          );
+
+      } catch (error) {
+
+        // Ignore.
+
+      }
+
+    }
+
+  }
+
+
+  function getPointerPosition(
+    editor,
+    event
+  ) {
+
+    const rect =
+      editor.canvas
+        .getBoundingClientRect();
+
+
+    return {
+      x:
+        (
+          event.clientX -
+          rect.left
+        ) *
+        (
+          editor.canvas.width /
+          rect.width
+        ),
+      y:
+        (
+          event.clientY -
+          rect.top
+        ) *
+        (
+          editor.canvas.height /
+          rect.height
+        )
+    };
+
+  }
+
+
+  function getCanvasUnitsPerCssPixel_(
+    editor
+  ) {
+
+    const rect =
+      editor.canvas
+        .getBoundingClientRect();
+
+
+    return {
+      x:
+        rect.width > 0
+          ? editor.canvas.width /
+            rect.width
+          : 1,
+      y:
+        rect.height > 0
+          ? editor.canvas.height /
+            rect.height
+          : 1
+    };
+
+  }
+
+
+  function getDisplayPoint_(
+    editor,
+    index
+  ) {
+
+    const point =
+      editor.points[index];
+
+
+    return {
+      x:
+        point.x *
+        editor.scaleX,
+      y:
+        point.y *
+        editor.scaleY
+    };
+
+  }
+
+
+  function findNearestCorner_(
+    editor,
+    x,
+    y
+  ) {
+
+    let bestIndex =
+      -1;
+
+
+    let bestDistance =
+      Infinity;
+
+
+    editor.points.forEach(
+      function(
+        point,
+        index
+      ) {
+
+        const displayPoint =
+          getDisplayPoint_(
+            editor,
+            index
+          );
+
+
+        const dx =
+          x -
+          displayPoint.x;
+
+
+        const dy =
+          y -
+          displayPoint.y;
+
+
+        const distance =
+          dx * dx +
+          dy * dy;
+
+
+        if (
+          distance <
+          bestDistance
+        ) {
+
+          bestDistance =
+            distance;
+
+
+          bestIndex =
+            index;
+
+        }
+
+      }
+    );
+
+
+    return bestIndex;
+
+  }
+
+
+  function createCornerZoomRegion_(
+    editor,
+    index
+  ) {
+
+    const point =
+      editor.points[index];
+
+
+    const zoomFactor =
+      editor.isMobile
+        ? 3
+        : 2.5;
+
+
+    const regionWidth =
+      Math.min(
+        editor.sourceWidth,
+        editor.sourceWidth /
+        zoomFactor
+      );
+
+
+    const regionHeight =
+      Math.min(
+        editor.sourceHeight,
+        editor.sourceHeight /
+        zoomFactor
+      );
+
+
+    const x =
+      clamp(        point.x -
+        regionWidth /
+        2,
+        0,
+        Math.max(
+          0,
+          editor.sourceWidth -
+          regionWidth
+        )
+      );
+
+
+    const y =
+      clamp(
+        point.y -
+        regionHeight /
+        2,
+        0,
+        Math.max(
+          0,
+          editor.sourceHeight -
+          regionHeight
+        )
+      );
+
+
+    return {
+      x:
+        x,
+      y:
+        y,
+      width:
+        regionWidth,
+      height:
+        regionHeight
+    };
+
+  }
+
+
+  function showMagnifier_(
+    editor
+  ) {
+
+    // Corner Edit V2 uses the main canvas as the zoom view.
+    hideMagnifier_(
+      editor
+    );
+
+  }
+
+
+  function hideMagnifier_(
+    editor
+  ) {
+
+    if (
+      editor.magnifier
+    ) {
+
+      editor.magnifier.style.display =
+        'none';
+
+    }
+
+  }
+
+
+  function drawEditor(
+    editor
+  ) {
+
+    if (
+      editor.activePointIndex >= 0 &&
+      editor.zoomRegion
+    ) {
+
+      drawCornerZoom_(
+        editor
+      );
+
+      return;
+
+    }
+
+
+    drawFullEditor_(
+      editor
+    );
+
+  }
+
+
+  function drawFullEditor_(
+    editor
+  ) {
+
+    const ctx =
+      editor.ctx;
+
+
+    ctx.clearRect(
+      0,
+      0,
+      editor.displayWidth,
+      editor.displayHeight
+    );
+
+
+    ctx.drawImage(
+      editor.image,
+      0,
+      0,
+      editor.displayWidth,
+      editor.displayHeight
+    );
+
+
+    const points =
+      editor.points.map(
+        function(point) {
+
+          return {
+            x:
+              point.x *
+              editor.scaleX,
+            y:
+              point.y *
+              editor.scaleY
+          };
+
+        }
+      );
+
+
+    ctx.save();
+
+
+    ctx.lineWidth =
+      3;
+
+
+    ctx.strokeStyle =
+      '#00e5ff';
+
+
+    ctx.fillStyle =
+      'rgba(0,229,255,0.10)';
+
+
+    ctx.beginPath();
+
+
+    ctx.moveTo(
+      points[0].x,
+      points[0].y
+    );
+
+
+    ctx.lineTo(
+      points[1].x,
+      points[1].y
+    );
+
+
+    ctx.lineTo(
+      points[2].x,
+      points[2].y
+    );
+
+
+    ctx.lineTo(
+      points[3].x,
+      points[3].y
+    );
+
+
+    ctx.closePath();
+
+
+    ctx.fill();
+
+
+    ctx.stroke();
+
+
+    const units =
+      getCanvasUnitsPerCssPixel_(
+        editor
+      );
+
+
+    const markerRadius =
+      Math.max(
+        editor.isMobile
+          ? 14
+          : 10,
+        editor.pointRadius
+      ) *
+      Math.max(
+        units.x,
+        units.y
+      );
+
+
+    points.forEach(
+      function(
+        point,
+        index
+      ) {
+
+        ctx.save();
+
+
+        ctx.beginPath();
+
+
+        ctx.moveTo(
+          point.x -
+          markerRadius,
+          point.y
+        );
+
+
+        ctx.lineTo(
+          point.x +
+          markerRadius,
+          point.y
+        );
+
+
+        ctx.moveTo(
+          point.x,
+          point.y -
+          markerRadius
+        );
+
+
+        ctx.lineTo(
+          point.x,
+          point.y +
+          markerRadius
+        );
+
+
+        ctx.strokeStyle =
+          '#00e5ff';
+
+
+        ctx.lineWidth =
+          Math.max(
+            4,
+            4 *
+            Math.max(
+              units.x,
+              units.y
+            )
+          );
+
+
+        ctx.stroke();
+
+
+        ctx.beginPath();
+
+
+        ctx.arc(
+          point.x,
+          point.y,
+          markerRadius *
+          0.72,
+          0,
+          Math.PI *
+          2
+        );
+
+
+        ctx.fillStyle =
+          '#1a73e8';
+
+
+        ctx.fill();
+
+
+        ctx.lineWidth =
+          Math.max(
+            2,
+            2 *
+            Math.max(
+              units.x,
+              units.y
+            )
+          );
+
+
+        ctx.strokeStyle =
+          '#ffffff';
+
+
+        ctx.stroke();
+
+
+        ctx.fillStyle =
+          '#ffffff';
+
+
+        ctx.font =
+          'bold ' +
+          Math.max(
+            14,
+            15 *
+            Math.max(
+              units.x,
+              units.y
+            )
+          ) +
+          'px Arial';
+
+
+        ctx.textAlign =
+          'center';
+
+
+        ctx.textBaseline =
+          'middle';
+
+
+        ctx.fillText(
+          String(
+            index +
+            1
+          ),
+          point.x,
+          point.y
+        );
+
+
+        ctx.restore();
+
+      }
+    );
+
+
+    ctx.restore();
+
+  }
+
+
+  function drawCornerZoom_(
+    editor
+  ) {
+
+    const ctx =
+      editor.ctx;
+
+
+    const region =
+      editor.zoomRegion;
+
+
+    const activeIndex =
+      editor.activePointIndex;
+
+
+    const point =
+      editor.points[
+        activeIndex
+      ];
+
+
+    const previousIndex =
+      (
+        activeIndex +
+        editor.points.length -
+        1
+      ) %
+      editor.points.length;
+
+
+    const nextIndex =
+      (
+        activeIndex +
+        1
+      ) %
+      editor.points.length;
+
+
+    const previousPoint =
+      editor.points[
+        previousIndex
+      ];
+
+
+    const nextPoint =
+      editor.points[
+        nextIndex
+      ];
+
+
+    ctx.clearRect(
+      0,
+      0,
+      editor.displayWidth,
+      editor.displayHeight
+    );
+
+
+    ctx.fillStyle =
+      '#111111';
+
+
+    ctx.fillRect(
+      0,
+      0,
+      editor.displayWidth,
+      editor.displayHeight
+    );
+
+
+    ctx.drawImage(
+      editor.image,
+      region.x,
+      region.y,
+      region.width,
+      region.height,
+      0,
+      0,
+      editor.displayWidth,
+      editor.displayHeight
+    );
+
+
+    function toZoomCanvasPoint_(
+      sourcePoint
+    ) {
+
+      return {
+        x:
+          (
+            sourcePoint.x -
+            region.x
+          ) /
+          region.width *
+          editor.displayWidth,
+        y:
+          (
+            sourcePoint.y -
+            region.y
+          ) /
+          region.height *
+          editor.displayHeight
+      };
+
+    }
+
+
+    const marker =
+      toZoomCanvasPoint_(
+        point
+      );
+
+
+    const previous =
+      toZoomCanvasPoint_(
+        previousPoint
+      );
+
+
+    const next =
+      toZoomCanvasPoint_(
+        nextPoint
+      );
+
+
+    const units =
+      getCanvasUnitsPerCssPixel_(
+        editor
+      );
+
+
+    const unitScale =
+      Math.max(
+        units.x,
+        units.y
+      );
+
+
+    const markerRadius =
+      20 *
+      unitScale;
+
+
+    function normalizedDirection_(
+      from,
+      to
+    ) {
+
+      const dx =
+        to.x -
+        from.x;
+
+
+      const dy =
+        to.y -
+        from.y;
+
+
+      const length =
+        Math.sqrt(
+          dx * dx +
+          dy * dy
+        );
+
+
+      if (
+        length <
+        0.0001
+      ) {
+
+        return {
+          x: 0,
+          y: 0
+        };
+
+      }
+
+
+      return {
+        x:
+          dx /
+          length,
+        y:
+          dy /
+          length
+      };
+
+    }
+
+
+    const previousDirection =
+      normalizedDirection_(
+        marker,
+        previous
+      );
+
+
+    const nextDirection =
+      normalizedDirection_(
+        marker,
+        next
+      );
+
+
+    ctx.save();
+
+
+    // Preserve the two real polygon-edge directions while zoomed.
+    // The neighbouring points may be outside the zoom viewport; canvas
+    // clipping will still show the correct direction from the active corner.
+    ctx.strokeStyle =
+      '#00e5ff';
+
+
+    ctx.lineWidth =
+      Math.max(
+        4,
+        4 *
+        unitScale
+      );
+
+
+    ctx.setLineDash([]);
+
+
+    ctx.beginPath();
+
+
+    ctx.moveTo(
+      previous.x,
+      previous.y
+    );
+
+
+    ctx.lineTo(
+      marker.x,
+      marker.y
+    );
+
+
+    ctx.lineTo(
+      next.x,
+      next.y
+    );
+
+
+    ctx.stroke();
+
+
+    // Extend both edge directions past the active corner.  These extensions
+    // replace the old fixed horizontal/vertical crosshair and make the
+    // theoretical corner easier to align on cut-corner or skewed cards.
+    const extensionLength =
+      90 *
+      unitScale;
+
+
+    ctx.strokeStyle =
+      'rgba(255,255,255,0.95)';
+
+
+    ctx.lineWidth =
+      Math.max(
+        3,
+        3 *
+        unitScale
+      );
+
+
+    ctx.setLineDash([
+      10 * unitScale,
+      7 * unitScale
+    ]);
+
+
+    ctx.beginPath();
+
+
+    ctx.moveTo(
+      marker.x,
+      marker.y
+    );
+
+
+    ctx.lineTo(
+      marker.x -
+      previousDirection.x *
+      extensionLength,
+      marker.y -
+      previousDirection.y *
+      extensionLength
+    );
+
+
+    ctx.moveTo(
+      marker.x,
+      marker.y
+    );
+
+
+    ctx.lineTo(
+      marker.x -
+      nextDirection.x *
+      extensionLength,
+      marker.y -
+      nextDirection.y *
+      extensionLength
+    );
+
+
+    ctx.stroke();
+
+
+    ctx.setLineDash([]);
+
+
+    // Ring marker keeps the actual image corner visible underneath.
+    ctx.beginPath();
+
+
+    ctx.arc(
+      marker.x,
+      marker.y,
+      markerRadius,
+      0,
+      Math.PI *
+      2
+    );
+
+
+    ctx.fillStyle =
+      'rgba(26,115,232,0.18)';
+
+
+    ctx.fill();
+
+
+    ctx.strokeStyle =
+      '#ffffff';
+
+
+    ctx.lineWidth =
+      Math.max(
+        3,
+        3 *
+        unitScale
+      );
+
+
+    ctx.stroke();
+
+
+    // Small centre dot shows the exact numerical corner location without
+    // obscuring the surrounding pixels.
+    ctx.beginPath();
+
+
+    ctx.arc(
+      marker.x,
+      marker.y,
+      Math.max(
+        3,
+        3 *
+        unitScale
+      ),
+      0,
+      Math.PI *
+      2
+    );
+
+
+    ctx.fillStyle =
+      '#ffffff';
+
+
+    ctx.fill();
+
+
+    const names = [
+      '左上角',
+      '右上角',
+      '右下角',
+      '左下角'
+    ];
+
+
+    const label =
+      '目前調整：' +
+      names[
+        activeIndex
+      ] +
+      ' ' +
+      String(
+        activeIndex +
+        1
+      );
+
+
+    const labelHeight =
+      44 *
+      unitScale;
+
+
+    ctx.fillStyle =
+      'rgba(0,0,0,0.72)';
+
+
+    ctx.fillRect(
+      0,
+      0,
+      editor.displayWidth,
+      labelHeight
+    );
+
+
+    ctx.fillStyle =
+      '#ffffff';
+
+
+    ctx.font =
+      'bold ' +
+      Math.max(
+        18,
+        19 *
+        unitScale
+      ) +
+      'px Arial';
+
+
+    ctx.textAlign =
+      'center';
+
+
+    ctx.textBaseline =
+      'middle';
+
+
+    ctx.fillText(
+      label,
+      editor.displayWidth /
+      2,
+      labelHeight /
+      2
+    );
+
+
+    ctx.restore();
+
+  }
+
+
+  /* ==================================================
+   * Perspective Geometry
+   * ================================================== */
+
+  function calculatePerspectiveGeometry_(
+    corners
+  ) {
+
+    const ordered =
+      orderCorners(
+        corners
+      );
+
+
+    const tl =
+      ordered[0];
+
+
+    const tr =
+      ordered[1];
+
+
+    const br =
+      ordered[2];
+
+
+    const bl =
+      ordered[3];
+
+
+    const top =
+      distance(
+        tl,
+        tr
+      );
+
+
+    const bottom =
+      distance(
+        bl,
+        br
+      );
+
+
+    const left =
+      distance(
+        tl,
+        bl
+      );
+
+
+    const right =
+      distance(
+        tr,
+        br
+      );
+
+
+    const geometricWidth =
+      Math.max(
+        top,
+        bottom
+      );
+
+
+    const geometricHeight =
+      Math.max(
+        left,
+        right
+      );
+
+
+    const landscape =
+      geometricWidth >=
+      geometricHeight;
+
+
+    const longEdge =
+      Math.max(
+        geometricWidth,
+        geometricHeight
+      );
+
+
+    const shortEdge =
+      Math.min(
+        geometricWidth,
+        geometricHeight
+      );
+
+
+    const geometricRatio =
+      shortEdge >
+      0
+        ? longEdge /
+          shortEdge
+        : 0;
+
+
+    return {
+
+      ordered:
+        ordered,
+
+      top:
+        top,
+
+      bottom:
+        bottom,
+
+      left:
+        left,
+
+      right:
+        right,
+
+      geometricWidth:
+        geometricWidth,
+
+      geometricHeight:
+        geometricHeight,
+
+      geometricRatio:
+        geometricRatio,
+
+      landscape:
+        landscape,
+
+      sourceLongEdge:
+        longEdge,
+
+      sourceShortEdge:
+        shortEdge
+
+    };
+
+  }
+
+
+  /* ==================================================
+   * Output Dimensions
+   * ================================================== */
+
+  function calculateOutputDimensions_(
+    geometry,
+    options
+  ) {
+
+    const useStandardRatio =
+      !options ||
+      options.useStandardRatio !==
+        false;
+
+
+    if (
+      useStandardRatio
+    ) {
+
+      if (
+        geometry.landscape
+      ) {
+
+        return {
+
+          width:
+            OUTPUT_LONG_EDGE,
+
+          height:
+            Math.round(
+              OUTPUT_LONG_EDGE /
+              STANDARD_CARD_RATIO
+            ),
+
+          outputRatio:
+            STANDARD_CARD_RATIO,
+
+          mode:
+            'standard',
+
+          physicalSize:
+            '90 × 54 mm'
+
+        };
+
+      }
+
+
+      return {
+
+        width:
+          Math.round(
+            OUTPUT_LONG_EDGE /
+            STANDARD_CARD_RATIO
+          ),
+
+        height:
+          OUTPUT_LONG_EDGE,
+
+        outputRatio:
+          STANDARD_CARD_RATIO,
+        mode:
+          'standard',
+
+        physicalSize:
+          '54 × 90 mm'
+
+      };
+
+    }
+
+
+    if (
+      geometry.landscape
+    ) {
+
+      const width =
+        OUTPUT_LONG_EDGE;
+
+
+      const height =
+        Math.max(
+          100,
+          Math.round(
+            width /
+            geometry.geometricRatio
+          )
+        );
+
+
+      return {
+
+        width:
+          width,
+
+        height:
+          height,
+
+        outputRatio:
+          width /
+          height,
+
+        mode:
+          'geometry',
+
+        physicalSize:
+          null
+
+      };
+
+    }
+
+
+    const height =
+      OUTPUT_LONG_EDGE;
+
+
+    const width =
+      Math.max(
+        100,
+        Math.round(
+          height /
+          geometry.geometricRatio
+        )
+      );
+
+
+    return {
+
+      width:
+        width,
+
+      height:
+        height,
+
+      outputRatio:
+        height /
+        width,
+
+      mode:
+        'geometry',
+
+      physicalSize:
+        null
+
+    };
+
+  }
+
+
+  /* ==================================================
+   * Perspective Transform
+   * ================================================== */
+
+  async function perspectiveTransform(
+    sourceDataUrl,
+    corners,
+    options
+  ) {
+
+    await waitForOpenCV();
+
+
+    const image =
+      await loadHtmlImage(
+        sourceDataUrl
+      );
+
+
+    const sourceCanvas =
+      document.createElement(
+        'canvas'
+      );
+
+
+    sourceCanvas.width =
+      image.naturalWidth;
+
+
+    sourceCanvas.height =
+      image.naturalHeight;
+
+
+    const ctx =
+      sourceCanvas.getContext(
+        '2d',
+        {
+          alpha:
+            false
+        }
+      );
+
+
+    ctx.drawImage(
+      image,
+      0,
+      0
+    );
+
+
+    const geometry =
+      calculatePerspectiveGeometry_(
+        corners
+      );
+
+
+    const output =
+      calculateOutputDimensions_(
+        geometry,
+        options ||
+        {}
+      );
+
+
+    const tl =
+      geometry.ordered[0];
+
+
+    const tr =
+      geometry.ordered[1];
+
+
+    const br =
+      geometry.ordered[2];
+
+
+    const bl =
+      geometry.ordered[3];
+
+
+    let src =
+      null;
+
+    let dst =
+      null;
+
+    let srcTri =
+      null;
+
+    let dstTri =
+      null;
+
+    let matrix =
+      null;
+
+
+    try {
+
+      src =
+        cv.imread(
+          sourceCanvas
+        );
+
+
+      dst =
+        new cv.Mat();
+
+
+      srcTri =
+        cv.matFromArray(
+          4,
+          1,
+          cv.CV_32FC2,
+          [
+            tl.x,
+            tl.y,
+
+            tr.x,
+            tr.y,
+
+            br.x,
+            br.y,
+
+            bl.x,
+            bl.y
+          ]
+        );
+
+
+      dstTri =
+        cv.matFromArray(
+          4,
+          1,
+          cv.CV_32FC2,
+          [
+            0,
+            0,
+
+            output.width -
+            1,
+            0,
+
+            output.width -
+            1,
+            output.height -
+            1,
+
+            0,
+            output.height -
+            1
+          ]
+        );
+
+
+      matrix =
+        cv.getPerspectiveTransform(
+          srcTri,
+          dstTri
+        );
+
+
+      cv.warpPerspective(
+        src,
+        dst,
+        matrix,
+        new cv.Size(
+          output.width,
+          output.height
+        ),
+        cv.INTER_LINEAR,
+        cv.BORDER_REPLICATE
+      );
+
+
+      const outputCanvas =
+        document.createElement(
+          'canvas'
+        );
+
+
+      outputCanvas.width =
+        output.width;
+
+
+      outputCanvas.height =
+        output.height;
+
+
+      cv.imshow(
+        outputCanvas,
+        dst
+      );
+
+
+      return {
+
+        dataUrl:
+          outputCanvas
+            .toDataURL(
+              'image/jpeg',
+              JPEG_QUALITY
+            ),
+
+        width:
+          output.width,
+
+        height:
+          output.height,
+
+        geometricRatio:
+          geometry.geometricRatio,
+
+        outputRatio:
+          Math.max(
+            output.width,
+            output.height
+          ) /
+          Math.min(
+            output.width,
+            output.height
+          ),
+
+        landscape:
+          geometry.landscape,
+
+        correctionMode:
+          output.mode,
+
+        physicalSize:
+          output.physicalSize,
+
+        sourceLongEdge:
+          geometry.sourceLongEdge,
+
+        sourceShortEdge:
+          geometry.sourceShortEdge,
+
+        corners:
+          geometry.ordered,
+
+        edgeLengths: {
+
+          top:
+            geometry.top,
+
+          bottom:
+            geometry.bottom,
+
+          left:
+            geometry.left,
+
+          right:
+            geometry.right
+
+        }
+
+      };
+
+
+    } finally {
+
+      if (src) {
+        src.delete();
+      }
+
+
+      if (dst) {
+        dst.delete();
+      }
+
+
+      if (srcTri) {
+        srcTri.delete();
+      }
+
+
+      if (dstTri) {
+        dstTri.delete();
+      }
+
+
+      if (matrix) {
+        matrix.delete();
+      }
+
+    }
+
+  }
+
+
+  /* ==================================================
+   * Crop Selected Region Without Perspective Correction
+   *
+   * Used for the back side of a business card. The four
+   * points define the recognition region only. Pixels are
+   * not warped or forced to the 90 x 54 mm ratio.
+   * ================================================== */
+
+  async function cropQuadrilateralRegion(
+    sourceDataUrl,
+    corners
+  ) {
+
+    const image =
+      await loadHtmlImage(
+        sourceDataUrl
+      );
+
+
+    const ordered =
+      orderCorners(
+        corners
+      );
+
+
+    const minX =
+      clamp(
+        Math.floor(
+          Math.min.apply(
+            null,
+            ordered.map(
+              function(point) {
+                return point.x;
+              }
+            )
+          )
+        ),
+        0,
+        image.naturalWidth - 1
+      );
+
+
+    const minY =
+      clamp(
+        Math.floor(
+          Math.min.apply(
+            null,
+            ordered.map(
+              function(point) {
+                return point.y;
+              }
+            )
+          )
+        ),
+        0,
+        image.naturalHeight - 1
+      );
+
+
+    const maxX =
+      clamp(
+        Math.ceil(
+          Math.max.apply(
+            null,
+            ordered.map(
+              function(point) {
+                return point.x;
+              }
+            )
+          )
+        ),
+        minX + 1,
+        image.naturalWidth
+      );
+
+
+    const maxY =
+      clamp(
+        Math.ceil(
+          Math.max.apply(
+            null,
+            ordered.map(
+              function(point) {
+                return point.y;
+              }
+            )
+          )
+        ),
+        minY + 1,
+        image.naturalHeight
+      );
+
+
+    const width =
+      Math.max(
+        1,
+        maxX - minX
+      );
+
+
+    const height =
+      Math.max(
+        1,
+        maxY - minY
+      );
+
+
+    const canvas =
+      document.createElement(
+        'canvas'
+      );
+
+
+    canvas.width =
+      width;
+
+    canvas.height =
+      height;
+
+
+    const ctx =
+      canvas.getContext(
+        '2d',
+        {
+          alpha:
+            false
+        }
+      );
+
+
+    ctx.fillStyle =
+      '#ffffff';
+
+
+    ctx.fillRect(
+      0,
+      0,
+      width,
+      height
+    );
+
+
+    ctx.save();
+
+
+    ctx.beginPath();
+
+
+    ctx.moveTo(
+      ordered[0].x - minX,
+      ordered[0].y - minY
+    );
+
+
+    for (
+      let i = 1;
+      i < ordered.length;
+      i++
+    ) {
+
+      ctx.lineTo(
+        ordered[i].x - minX,
+        ordered[i].y - minY
+      );
+
+    }
+
+
+    ctx.closePath();
+
+    ctx.clip();
+
+
+    ctx.drawImage(
+      image,
+      -minX,
+      -minY
+    );
+
+
+    ctx.restore();
+
+
+    const geometry =
+      calculatePerspectiveGeometry_(
+        ordered
+      );
+
+
+    return {
+
+      dataUrl:
+        canvas.toDataURL(
+          'image/jpeg',
+          JPEG_QUALITY
+        ),
+
+      width:
+        width,
+
+      height:
+        height,
+
+      geometricRatio:
+        geometry.geometricRatio,
+
+      outputRatio:
+        Math.max(
+          width,
+          height
+        ) /
+        Math.max(
+          1,
+          Math.min(
+            width,
+            height
+          )
+        ),
+
+      landscape:
+        width >= height,
+
+      correctionMode:
+        'crop-only',
+
+      physicalSize:
+        null,
+
+      sourceLongEdge:
+        geometry.sourceLongEdge,
+
+      sourceShortEdge:
+        geometry.sourceShortEdge,
+
+      corners:
+        ordered,
+
+      cropBounds: {
+        x:
+          minX,
+        y:
+          minY,
+        width:
+          width,
+        height:
+          height
+      }
+
+    };
+
+  }
+
+
+  /* ==================================================
+   * Rotate
+   * ================================================== */
+
+  async function rotate90(
+    dataUrl,
+    direction
+  ) {
+
+    return rotateByDegrees_(
+      dataUrl,
+      direction ===
+        'left'
+        ? -90
+        : 90
+    );
+
+  }
+
+
+  async function rotateByDegrees_(
+    dataUrl,
+    degrees
+  ) {
+
+    const image =
+      await loadHtmlImage(
+        dataUrl
+      );
+
+
+    const radians =
+      degrees *
+      Math.PI /
+      180;
+
+
+    const sin =
+      Math.abs(
+        Math.sin(
+          radians
+        )
+      );
+
+
+    const cos =
+      Math.abs(
+        Math.cos(
+          radians
+        )
+      );
+
+
+    const oldWidth =
+      image.naturalWidth;
+
+
+    const oldHeight =
+      image.naturalHeight;
+
+
+    const newWidth =
+      Math.ceil(
+        oldWidth *
+        cos +
+        oldHeight *
+        sin
+      );
+
+
+    const newHeight =
+      Math.ceil(
+        oldWidth *
+        sin +
+        oldHeight *
+        cos
+      );
+
+
+    const canvas =
+      document.createElement(
+        'canvas'
+      );
+
+
+    canvas.width =
+      newWidth;
+
+
+    canvas.height =
+      newHeight;
+
+
+    const ctx =
+      canvas.getContext(
+        '2d',
+        {
+          alpha:
+            false
+        }
+      );
+
+
+    ctx.fillStyle =
+      '#ffffff';
+
+
+    ctx.fillRect(
+      0,
+      0,
+      newWidth,
+      newHeight
+    );
+
+
+    ctx.translate(
+      newWidth /
+      2,
+      newHeight /
+      2
+    );
+
+
+    ctx.rotate(
+      radians
+    );
+
+
+    ctx.drawImage(
+      image,
+      -oldWidth /
+      2,
+      -oldHeight /
+      2
+    );
+
+
+    return {
+
+      dataUrl:
+        canvas.toDataURL(
+          'image/jpeg',
+          JPEG_QUALITY
+        ),
+
+      width:
+        newWidth,
+
+      height:
+        newHeight,
+
+      angle:
+        degrees
+
+    };
+
+  }
+
+
+  /* ==================================================
+   * Quality Analysis
+   * ================================================== */
+
+  async function analyzeImageQuality(
+    dataUrl,
+    sourceMetrics
+  ) {
+
+    await waitForOpenCV();
+
+
+    const image =
+      await loadHtmlImage(
+        dataUrl
+      );
+
+
+    let width =
+      image.naturalWidth;
+
+
+    let height =
+      image.naturalHeight;
+
+
+    const maxDimension =
+      Math.max(
+        width,
+        height
+      );
+
+
+    if (
+      maxDimension >
+      QUALITY_MAX_DIMENSION
+    ) {
+
+      const ratio =
+        QUALITY_MAX_DIMENSION /
+        maxDimension;
+
+
+      width =
+        Math.round(
+          width *
+          ratio
+        );
+
+
+      height =
+        Math.round(
+          height *
+          ratio
+        );
+
+    }
+
+
+    const canvas =
+      document.createElement(
+        'canvas'
+      );
+
+
+    canvas.width =
+      width;
+
+
+    canvas.height =
+      height;
+
+
+    const ctx =
+      canvas.getContext(
+        '2d',
+        {
+          alpha:
+            false
+        }
+      );
+
+
+    ctx.drawImage(
+      image,
+      0,
+      0,
+      width,
+      height
+    );
+
+
+    let src =
+      null;
+
+    let gray =
+      null;
+
+    let laplacian =
+      null;
+
+    let mean =
+      null;
+
+    let stddev =
+      null;
+
+    let lapMean =
+      null;
+
+    let lapStd =
+      null;
+
+
+    try {
+
+      src =
+        cv.imread(
+          canvas
+        );
+
+
+      gray =
+        new cv.Mat();
+
+
+      laplacian =
+        new cv.Mat();
+
+
+      cv.cvtColor(
+        src,
+        gray,
+        cv.COLOR_RGBA2GRAY
+      );
+
+
+      cv.Laplacian(
+        gray,
+        laplacian,
+        cv.CV_64F
+      );
+
+
+      mean =
+        new cv.Mat();
+
+
+      stddev =
+        new cv.Mat();
+
+
+      cv.meanStdDev(
+        gray,
+        mean,
+        stddev
+      );
+
+
+      lapMean =
+        new cv.Mat();
+
+
+      lapStd =
+        new cv.Mat();
+
+
+      cv.meanStdDev(
+        laplacian,
+        lapMean,
+        lapStd
+      );
+
+
+      const brightness =
+        Number(
+          mean.data64F[0]
+        );
+
+
+      const contrastStd =
+        Number(
+          stddev.data64F[0]
+        );
+
+
+      const lapStdValue =
+        Number(
+          lapStd.data64F[0]
+        );
+
+
+      const blurVariance =
+        lapStdValue *
+        lapStdValue;
+
+
+      const issues =
+        [];
+
+
+      let blocked =
+        false;
+
+
+      const sourceShortEdge =
+        Number(
+          sourceMetrics &&          sourceMetrics.sourceShortEdge
+            ? sourceMetrics.sourceShortEdge
+            : Math.min(
+                image.naturalWidth,
+                image.naturalHeight
+              )
+        );
+
+
+      if (
+        sourceShortEdge <
+        BLOCK_MIN_SOURCE_SHORT_EDGE
+      ) {
+
+        blocked =
+          true;
+
+
+        issues.push({
+
+          level:
+            'error',
+
+          code:
+            'resolution_too_low',
+
+          message:
+            '名片在原始圖片中的解析度過低，建議重新拍攝。'
+
+        });
+
+      } else if (
+        sourceShortEdge <
+        WARN_MIN_SOURCE_SHORT_EDGE
+      ) {
+
+        issues.push({
+
+          level:
+            'warning',
+
+          code:
+            'resolution_low',
+
+          message:
+            '名片解析度偏低，可能影響小字辨識。'
+
+        });
+
+      }
+
+
+      if (
+        blurVariance <
+        BLOCK_BLUR_VARIANCE
+      ) {
+
+        blocked =
+          true;
+
+
+        issues.push({
+
+          level:
+            'error',
+
+          code:
+            'too_blurry',
+
+          message:
+            '圖片明顯模糊，建議重新拍攝。'
+
+        });
+
+      } else if (
+        blurVariance <
+        WARN_BLUR_VARIANCE
+      ) {
+
+        issues.push({
+
+          level:
+            'warning',
+
+          code:
+            'slightly_blurry',
+
+          message:
+            '圖片略微模糊，細小文字可能較難辨識。'
+
+        });
+
+      }
+
+
+      if (
+        brightness <
+        WARN_DARK_BRIGHTNESS
+      ) {
+
+        issues.push({
+
+          level:
+            'warning',
+
+          code:
+            'too_dark',
+
+          message:
+            '圖片偏暗，建議增加環境光線。'
+
+        });
+
+      }
+
+
+      if (
+        brightness >
+        WARN_BRIGHT_BRIGHTNESS
+      ) {
+
+        issues.push({
+
+          level:
+            'warning',
+
+          code:
+            'too_bright',
+
+          message:
+            '圖片偏亮，可能有過曝或反光。'
+
+        });
+
+      }
+
+
+      if (
+        contrastStd <
+        WARN_LOW_CONTRAST_STD
+      ) {
+
+        issues.push({
+
+          level:
+            'warning',
+
+          code:
+            'low_contrast',
+
+          message:
+            '圖片對比偏低，文字與背景可能不易區分。'
+
+        });
+
+      }
+
+
+      return {
+
+        blocked:
+          blocked,
+
+        ok:
+          !blocked,
+
+        issues:
+          issues,
+
+        metrics: {
+
+          processedWidth:
+            image.naturalWidth,
+
+          processedHeight:
+            image.naturalHeight,
+
+          sourceShortEdge:
+            Math.round(
+              sourceShortEdge
+            ),
+
+          brightness:
+            roundNumber_(
+              brightness,
+              1
+            ),
+
+          contrastStd:
+            roundNumber_(
+              contrastStd,
+              1
+            ),
+
+          blurVariance:
+            roundNumber_(
+              blurVariance,
+              1
+            )
+
+        }
+
+      };
+
+
+    } finally {
+
+      if (src) {
+        src.delete();
+      }
+
+
+      if (gray) {
+        gray.delete();
+      }
+
+
+      if (laplacian) {
+        laplacian.delete();
+      }
+
+
+      if (mean) {
+        mean.delete();
+      }
+
+
+      if (stddev) {
+        stddev.delete();
+      }
+
+
+      if (lapMean) {
+        lapMean.delete();
+      }
+
+
+      if (lapStd) {
+        lapStd.delete();
+      }
+
+    }
+
+  }
+
+
+  /* ==================================================
+   * Contact Photo
+   * ================================================== */
+
+  async function createContactPhoto(
+    cardDataUrl
+  ) {
+
+    if (
+      !cardDataUrl
+    ) {
+
+      throw new Error(
+        '沒有可建立聯絡人頭像的名片圖片。'
+      );
+
+    }
+
+
+    const image =
+      await loadHtmlImage(
+        cardDataUrl
+      );
+
+
+    const cardWidth =
+      image.naturalWidth;
+
+
+    const cardHeight =
+      image.naturalHeight;
+
+
+    if (
+      !cardWidth ||
+      !cardHeight
+    ) {
+
+      throw new Error(
+        '無法取得名片圖片尺寸。'
+      );
+
+    }
+
+
+    const backgroundColor =
+      getCardBackgroundColor_(
+        image
+      );
+
+
+    const canvas =
+      document.createElement(
+        'canvas'
+      );
+
+
+    canvas.width =
+      CONTACT_PHOTO_SIZE;
+
+
+    canvas.height =
+      CONTACT_PHOTO_SIZE;
+
+
+    const ctx =
+      canvas.getContext(
+        '2d',
+        {
+          alpha:
+            false
+        }
+      );
+
+
+    ctx.fillStyle =
+      backgroundColor.css;
+
+
+    ctx.fillRect(
+      0,
+      0,
+      CONTACT_PHOTO_SIZE,
+      CONTACT_PHOTO_SIZE
+    );
+
+
+    const cardRatio =
+      cardWidth /
+      cardHeight;
+
+
+    const safeRadius =
+      CONTACT_PHOTO_SIZE *
+      CONTACT_PHOTO_SAFE_RADIUS_RATIO *
+      CONTACT_PHOTO_MARGIN_RATIO;
+
+
+    let targetWidth;
+
+    let targetHeight;
+
+
+    /*
+     * 矩形四角必須全部位於圓形安全區內。
+     *
+     * (w/2)^2 + (h/2)^2 <= r^2
+     */
+
+    if (
+      cardRatio >=
+      1
+    ) {
+
+      targetHeight =
+        (
+          2 *
+          safeRadius
+        ) /
+        Math.sqrt(
+          cardRatio *
+          cardRatio +
+          1
+        );
+
+
+      targetWidth =
+        targetHeight *
+        cardRatio;
+
+    } else {
+
+      targetWidth =
+        (
+          2 *
+          safeRadius
+        ) /
+        Math.sqrt(
+          1 +
+          (
+            1 /
+            (
+              cardRatio *
+              cardRatio
+            )
+          )
+        );
+
+
+      targetHeight =
+        targetWidth /
+        cardRatio;
+
+    }
+
+
+    targetWidth =
+      Math.floor(
+        targetWidth
+      );
+
+
+    targetHeight =
+      Math.floor(
+        targetHeight
+      );
+
+
+    const x =
+      Math.round(
+        (
+          CONTACT_PHOTO_SIZE -
+          targetWidth
+        ) /
+        2
+      );
+
+
+    const y =
+      Math.round(
+        (
+          CONTACT_PHOTO_SIZE -
+          targetHeight
+        ) /
+        2
+      );
+
+
+    ctx.imageSmoothingEnabled =
+      true;
+
+
+    ctx.imageSmoothingQuality =
+      'high';
+
+
+    ctx.drawImage(
+      image,
+      x,
+      y,
+      targetWidth,
+      targetHeight
+    );
+
+
+    return {
+
+      dataUrl:
+        canvas.toDataURL(
+          'image/jpeg',
+          0.92
+        ),
+
+      width:
+        CONTACT_PHOTO_SIZE,
+
+      height:
+        CONTACT_PHOTO_SIZE,
+
+      cardWidth:
+        targetWidth,
+
+      cardHeight:
+        targetHeight,
+
+      backgroundColor:
+        backgroundColor.css,
+
+      safeRadius:
+        Math.round(
+          safeRadius
+        )
+
+    };
+
+  }
+
+
+  /* ==================================================
+   * Contact Photo Background Color
+   * ================================================== */
+
+  function getCardBackgroundColor_(
+    image
+  ) {
+
+    const sampleCanvas =
+      document.createElement(
+        'canvas'
+      );
+
+
+    const sampleWidth =
+      Math.min(
+        image.naturalWidth,
+        600
+      );
+
+
+    const scale =
+      sampleWidth /
+      image.naturalWidth;
+
+
+    const sampleHeight =
+      Math.max(
+        1,
+        Math.round(
+          image.naturalHeight *
+          scale
+        )
+      );
+
+
+    sampleCanvas.width =
+      sampleWidth;
+
+
+    sampleCanvas.height =
+      sampleHeight;
+
+
+    const ctx =
+      sampleCanvas.getContext(
+        '2d',
+        {
+          willReadFrequently:
+            true
+        }
+      );
+
+
+    ctx.drawImage(
+      image,
+      0,
+      0,
+      sampleWidth,
+      sampleHeight
+    );
+
+
+    const imageData =
+      ctx.getImageData(
+        0,
+        0,
+        sampleWidth,
+        sampleHeight
+      );
+
+
+    const data =
+      imageData.data;
+
+
+    const borderSize =
+      Math.max(
+        3,
+        Math.round(
+          Math.min(
+            sampleWidth,
+            sampleHeight
+          ) *
+          0.04
+        )
+      );
+
+
+    const samples =
+      [];
+
+
+    for (
+      let y = 0;
+      y < sampleHeight;
+      y++
+    ) {
+
+      for (
+        let x = 0;
+        x < sampleWidth;
+        x++
+      ) {
+
+        const isBorder =
+          x <
+            borderSize ||
+          x >=
+            sampleWidth -
+            borderSize ||
+          y <
+            borderSize ||
+          y >=
+            sampleHeight -
+            borderSize;
+
+
+        if (
+          !isBorder
+        ) {
+
+          continue;
+
+        }
+
+
+        const index =
+          (
+            y *
+            sampleWidth +
+            x
+          ) *
+          4;
+
+
+        samples.push({
+
+          r:
+            data[
+              index
+            ],
+
+          g:
+            data[
+              index +
+              1
+            ],
+
+          b:
+            data[
+              index +
+              2
+            ]
+
+        });
+
+      }
+
+    }
+
+
+    if (
+      samples.length ===
+      0
+    ) {
+
+      return {
+
+        r:
+          255,
+
+        g:
+          255,
+
+        b:
+          255,
+
+        css:
+          'rgb(255, 255, 255)'
+
+      };
+
+    }
+
+
+    /*
+     * 用 RGB 各自中位數，
+     * 比直接平均更不容易被：
+     *
+     * Logo
+     * 黑字
+     * QR Code
+     * 彩色圖案
+     *
+     * 拉偏。
+     */
+
+    const redValues =
+      samples.map(
+        function(item) {
+          return item.r;
+        }
+      );
+
+
+    const greenValues =
+      samples.map(
+        function(item) {
+          return item.g;
+        }
+      );
+
+
+    const blueValues =
+      samples.map(
+        function(item) {
+          return item.b;
+        }
+      );
+
+
+    const r =
+      Math.round(
+        median_(
+          redValues
+        )
+      );
+
+
+    const g =
+      Math.round(
+        median_(
+          greenValues
+        )
+      );
+
+
+    const b =
+      Math.round(
+        median_(
+          blueValues
+        )
+      );
+
+
+    return {
+
+      r:
+        r,
+
+      g:
+        g,
+
+      b:
+        b,
+
+      css:
+        'rgb(' +
+        r +
+        ', ' +
+        g +
+        ', ' +
+        b +
+        ')'
+
+    };
+
+  }
+
+
+  /* ==================================================
+   * Utility
+   * ================================================== */
+
+  function distance(
+    a,
+    b
+  ) {
+
+    const dx =
+      a.x -
+      b.x;
+
+
+    const dy =
+      a.y -
+      b.y;
+
+
+    return Math.sqrt(
+      dx *
+      dx +
+      dy *
+      dy
+    );
+
+  }
+
+
+  function clamp(
+    value,
+    min,
+    max
+  ) {
+
+    return Math.max(
+      min,
+      Math.min(
+        max,
+        value
+      )
+    );
+
+  }
+
+
+  function median_(
+    values
+  ) {
+
+    if (
+      !values ||
+      values.length === 0
+    ) {
+
+      return 0;
+
+    }
+
+
+    const sorted =
+      values
+        .slice()
+        .sort(
+          function(
+            a,
+            b
+          ) {
+
+            return (
+              a -
+              b
+            );
+
+          }
+        );
+
+
+    const middle =
+      Math.floor(
+        sorted.length /
+        2
+      );
+
+
+    if (
+      sorted.length %
+      2 ===
+      1
+    ) {
+
+      return sorted[
+        middle
+      ];
+
+    }
+
+
+    return (
+      sorted[
+        middle -
+        1
+      ] +
+      sorted[
+        middle
+      ]
+    ) /
+    2;
+
+  }
+
+
+  function roundNumber_(
+    value,
+    digits
+  ) {
+
+    const power =
+      Math.pow(
+        10,
+        digits
+      );
+
+
+    return Math.round(
+      value *
+      power
+    ) /
+    power;
+
+  }
+
+
+  /* ==================================================
+   * Public API
+   * ================================================== */
+
+  window.CardImageProcessor = {
+
+    waitForOpenCV:
+      waitForOpenCV,
+
+    normalizeSourceImage:
+      normalizeSourceImage,
+
+    detectCardCorners:
+      detectCardCorners,
+
+    redetectCardCorners:
+      redetectCardCorners,
+
+    createCornerEditor:
+      createCornerEditor,
+
+    setEditorCorners:
+      setEditorCorners,
+
+    getEditorCorners:
+      getEditorCorners,
+
+    perspectiveTransform:
+      perspectiveTransform,
+
+    cropQuadrilateralRegion:
+      cropQuadrilateralRegion,
+
+    rotate90:
+      rotate90,
+
+    analyzeImageQuality:
+      analyzeImageQuality,
+
+    createContactPhoto:
+      createContactPhoto,
+
+    orderCorners:
+      orderCorners,
+
+    standardCardRatio:
+      STANDARD_CARD_RATIO
+
+  };
+
+})();
+
+</script>
