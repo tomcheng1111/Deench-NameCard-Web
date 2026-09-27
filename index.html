@@ -12371,6 +12371,22 @@ function recognizeCard() {
 }
 
 
+function correctRecognitionEmailFields(contact) {
+  if (!contact || typeof contact !== 'object') return contact;
+  const emails = Array.isArray(contact.emails) ? contact.emails : [];
+  const websites = Array.isArray(contact.websites) ? contact.websites : [];
+  contact.websites = websites.filter(site => {
+    const value = typeof site?.value === 'string' ? site.value.trim().replace(/^mailto:/i, '') : '';
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) return true;
+    if (!emails.some(item => String(item?.value || '').trim().toLowerCase() === value.toLowerCase())) {
+      emails.push({type: 'work', value});
+    }
+    return false;
+  });
+  contact.emails = emails;
+  return contact;
+}
+
 function completeRecognitionBiography(contact) {
   if (!contact || typeof contact !== 'object') return contact;
   let notes = typeof contact.finalBiography === 'string' ? contact.finalBiography.trim() : '';
@@ -12407,7 +12423,7 @@ async function handleRecognitionSuccess(
 
 
   response.contact =
-    completeRecognitionBiography(response.contact);
+    completeRecognitionBiography(correctRecognitionEmailFields(response.contact));
 
   currentContact =
     response.contact;
