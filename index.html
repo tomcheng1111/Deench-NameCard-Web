@@ -2691,6 +2691,13 @@
 
     </div>
 
+    <button
+      type="button"
+      id="headerSwitchGoogleAccountButton"
+      aria-label="重新選擇要使用的 Google 聯絡人帳號"
+    >
+      切換 Google 帳號
+    </button>
 
     <div
       id="debugToggleWrapper"
@@ -16452,12 +16459,25 @@ function checkCurrentGoogleAccount() {
   }
 }
 
+function switchGoogleAccount() {
+  if (
+    (frontProcessedImageDataUrl || backProcessedImageDataUrl || currentContact) &&
+    !window.confirm('切換帳號會離開目前頁面，尚未儲存的名片資料將遺失。要繼續嗎？')
+  ) {
+    return;
+  }
+  window.top.location.href =
+    window.NAMECARD_CONFIG.API_BASE_URL +
+    '/auth/logout?switch=1';
+}
+
 switchGoogleAccountButton.onclick =
-  function() {
-    window.top.location.href =
-      window.NAMECARD_CONFIG.API_BASE_URL +
-      '/auth/logout?switch=1';
-  };
+  switchGoogleAccount;
+
+document.getElementById(
+  'headerSwitchGoogleAccountButton'
+).onclick =
+  switchGoogleAccount;
 
 retryAccountCheckButton.onclick =
   function() {
