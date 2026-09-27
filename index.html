@@ -12371,6 +12371,23 @@ function recognizeCard() {
 }
 
 
+function completeRecognitionBiography(contact) {
+  if (!contact || typeof contact !== 'object') return contact;
+  let notes = typeof contact.finalBiography === 'string' ? contact.finalBiography.trim() : '';
+  for (const [label, value] of [
+    ['營業項目', contact.businessScope],
+    ['QR Code', contact.qrCodes],
+    ['其他資訊', contact.otherInfo]
+  ]) {
+    const items = Array.isArray(value) ? value : typeof value === 'string' ? [value] : [];
+    const missing = [...new Set(items.filter(item => typeof item === 'string').map(item => item.trim()).filter(Boolean))]
+      .filter(item => !notes.replace(/\s+/g, '').includes(item.replace(/\s+/g, '')));
+    if (missing.length) notes += (notes ? '\n\n' : '') + label + '：\n' + missing.map(item => '• ' + item).join('\n');
+  }
+  contact.finalBiography = notes;
+  return contact;
+}
+
 async function handleRecognitionSuccess(
   response
 ) {
@@ -12388,6 +12405,9 @@ async function handleRecognitionSuccess(
   statusElement.className =
     'success';
 
+
+  response.contact =
+    completeRecognitionBiography(response.contact);
 
   currentContact =
     response.contact;
