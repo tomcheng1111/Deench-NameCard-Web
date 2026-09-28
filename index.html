@@ -858,7 +858,7 @@
       display: grid;
 
       grid-template-columns:
-        150px 1fr 120px;
+        150px minmax(0, 1fr) 120px 48px;
 
       gap: 8px;
 
@@ -870,13 +870,22 @@
       display: grid;
 
       grid-template-columns:
-        150px 1fr;
+        150px minmax(0, 1fr) 48px;
 
       gap: 8px;
 
       margin-bottom: 10px;
     }
 
+
+    .field-group[hidden], .notes-field[hidden] { display: none; }
+    .field-group { position: relative; padding-right: 38px; }
+    .field-remove { min-width: 42px; min-height: 42px; border: 1px solid #ccc; border-radius: 7px; background: #fff; color: #a12323; font-size: 22px; cursor: pointer; }
+    .field-group > .field-remove { position: absolute; right: 0; top: 0; }
+    .notes-field > .field-remove { float: right; }
+    .add-field-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 16px 0; }
+    .add-field-controls select, .add-field-controls button { min-height: 44px; font-size: 16px; }
+    @media (max-width: 768px) { .dynamic-row, .dynamic-row-address { grid-template-columns: minmax(0, 1fr) 48px; } .dynamic-row > select, .dynamic-row-address > select, .dynamic-row > input, .dynamic-row-address > input { grid-column: 1; } .dynamic-row > .field-remove, .dynamic-row-address > .field-remove { grid-column: 2; grid-row: 1; } }
 
     textarea {
       resize: vertical;
@@ -2514,6 +2523,10 @@
       }
     }
 
+    @media (max-width: 768px) {
+      .dynamic-row, .dynamic-row-address, html.mobile-ui .dynamic-row, html.mobile-ui .dynamic-row-address { grid-template-columns: minmax(0, 1fr) 48px; }
+      .dynamic-row > .field-remove, .dynamic-row-address > .field-remove { grid-column: 2; grid-row: 1; }
+    }
   </style>
 
 
@@ -3270,6 +3283,7 @@
     </div>
 
 
+    <div class="add-field-controls"><label for="newContactField">新增欄位</label><select id="newContactField"><option value="phones">電話／手機／傳真</option><option value="emails">Email</option><option value="addresses">地址</option><option value="websites">網站</option><option value="displayName">姓名</option><option value="familyName">姓氏</option><option value="givenName">名字</option><option value="organizationName">公司</option><option value="department">部門</option><option value="title">職稱</option><option value="notes">附註</option></select><button type="button" id="addContactFieldButton">＋ 新增欄位</button></div>
     <div class="form-grid">
 
       <div class="field-group">
@@ -3414,9 +3428,7 @@
     <div id="websitesContainer"></div>
 
 
-    <h3>
-      附註
-    </h3>
+    <div class="notes-field" id="notesFieldGroup"><button type="button" class="field-remove" aria-label="刪除附註欄位" title="刪除附註欄位" data-remove-notes>×</button><h3>附註</h3>
 
 
     <div class="biography-help">
@@ -3430,7 +3442,7 @@
     <textarea
       id="notes"
       rows="16"
-    ></textarea>
+    ></textarea></div>
 
 
     <div class="step-actions">
@@ -12698,6 +12710,9 @@ function showEditor(
       'block';
 
 
+  document.querySelectorAll('#contactEditor .field-group[hidden]').forEach(group => { group.hidden = false; });
+  document.getElementById('notesFieldGroup').hidden = false;
+
   setValue(
     'displayName',
     contact.name
@@ -12792,7 +12807,8 @@ function showEditor(
  * ================================================== */
 
 function renderPhones(
-  items
+  items,
+  append = false
 ) {
 
   const container =
@@ -12801,7 +12817,7 @@ function renderPhones(
     );
 
 
-  container.innerHTML =
+  if (!append) container.innerHTML =
     '';
 
 
@@ -12854,6 +12870,7 @@ function renderPhones(
           'other';
 
 
+      attachFieldRemove(row, '電話');
       container.appendChild(
         row
       );
@@ -12865,7 +12882,8 @@ function renderPhones(
 
 
 function renderEmails(
-  items
+  items,
+  append = false
 ) {
 
   const container =
@@ -12874,7 +12892,7 @@ function renderEmails(
     );
 
 
-  container.innerHTML =
+  if (!append) container.innerHTML =
     '';
 
 
@@ -12906,7 +12924,7 @@ function renderEmails(
           )}"
         >
 
-        <div></div>
+
       `;
 
 
@@ -12919,6 +12937,7 @@ function renderEmails(
           'other';
 
 
+      attachFieldRemove(row, 'Email');
       container.appendChild(
         row
       );
@@ -12930,7 +12949,8 @@ function renderEmails(
 
 
 function renderAddresses(
-  items
+  items,
+  append = false
 ) {
 
   const container =
@@ -12939,7 +12959,7 @@ function renderAddresses(
     );
 
 
-  container.innerHTML =
+  if (!append) container.innerHTML =
     '';
 
 
@@ -12966,7 +12986,7 @@ function renderAddresses(
         <input
           class="address-value"
           value="${escAttr(
-            item.formatted ||
+            item.formattedValue || item.formatted || item.value ||
             ''
           )}"
         >
@@ -12982,6 +13002,7 @@ function renderAddresses(
           'work';
 
 
+      attachFieldRemove(row, '地址');
       container.appendChild(
         row
       );
@@ -12993,7 +13014,8 @@ function renderAddresses(
 
 
 function renderWebsites(
-  items
+  items,
+  append = false
 ) {
 
   const container =
@@ -13002,7 +13024,7 @@ function renderWebsites(
     );
 
 
-  container.innerHTML =
+  if (!append) container.innerHTML =
     '';
 
 
@@ -13034,7 +13056,7 @@ function renderWebsites(
           )}"
         >
 
-        <div></div>
+
       `;
 
 
@@ -13047,6 +13069,7 @@ function renderWebsites(
           'other';
 
 
+      attachFieldRemove(row, '網站');
       container.appendChild(
         row
       );
@@ -13056,6 +13079,51 @@ function renderWebsites(
 
 }
 
+
+
+function attachFieldRemove(row, label) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'field-remove';
+  button.textContent = '×';
+  button.title = '刪除' + label + '欄位';
+  button.setAttribute('aria-label', button.title);
+  button.addEventListener('click', () => row.remove());
+  row.appendChild(button);
+}
+
+const contactEditor = document.getElementById('contactEditor');
+contactEditor.querySelectorAll('.form-grid .field-group').forEach(group => {
+  const input = group.querySelector('input');
+  const label = group.querySelector('label')?.textContent.trim() || '此';
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'field-remove';
+  button.textContent = '×';
+  button.title = '刪除' + label + '欄位';
+  button.setAttribute('aria-label', button.title);
+  button.addEventListener('click', () => { input.value = ''; group.hidden = true; });
+  group.appendChild(button);
+});
+document.querySelector('[data-remove-notes]').addEventListener('click', () => {
+  document.getElementById('notes').value = '';
+  document.getElementById('notesFieldGroup').hidden = true;
+});
+document.getElementById('addContactFieldButton').addEventListener('click', () => {
+  const selection = document.getElementById('newContactField').value;
+  const renderers = {phones: renderPhones, emails: renderEmails, addresses: renderAddresses, websites: renderWebsites};
+  if (renderers[selection]) {
+    renderers[selection]([{type:'work', value:'', formattedValue:''}], true);
+    document.getElementById(selection + 'Container').lastElementChild?.querySelector('input')?.focus();
+  } else if (selection === 'notes') {
+    document.getElementById('notesFieldGroup').hidden = false;
+    document.getElementById('notes').focus();
+  } else {
+    const input = document.getElementById(selection);
+    const group = input?.closest('.field-group');
+    if (group) { group.hidden = false; input.focus(); }
+  }
+});
 
 /* ==================================================
  * Collect
@@ -13231,7 +13299,7 @@ function collectEditedContact() {
                 '.address-type'
               ).value,
 
-            formatted:
+            formattedValue:
               row.querySelector(
                 '.address-value'
               ).value.trim(),
@@ -13246,7 +13314,7 @@ function collectEditedContact() {
       .filter(
         function(item) {
 
-          return item.formatted;
+          return item.formattedValue;
 
         }
       );
