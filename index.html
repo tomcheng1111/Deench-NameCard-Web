@@ -2613,6 +2613,10 @@
 
 
 <script src="/config.js"></script>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script src="/auth-client.js"></script>
+<script src="/gateway-client.js"></script>
+<script src="/people-client.js"></script>
 <script src="/api-client.js"></script>
 </head>
 
@@ -2645,6 +2649,8 @@
       ></div>
 
       <div id="accountAccessNote" class="account-access-note"></div>
+
+      <div id="namecardSignIn" style="display:flex;justify-content:center;margin:12px 0;"></div>
 
       <div class="account-access-actions">
         <button
@@ -10331,10 +10337,10 @@ function renderDebugUsage(result) {
     ? `輸入 ${number(usage.geminiInputTokens)}、輸出 ${number(usage.geminiOutputTokens)}、總計 ${number(usage.geminiTotalTokens)} tokens`
     : '尚無模型回傳的 token 統計';
   const rows = [
-    ['Gemini ' + (result.model || ''), `${number(usage.geminiRequests || 0)} 次請求；${tokens}`, '無法取得（動態共用容量沒有固定的個人剩餘值）'],
-    ['Google Contacts / People API', `${number(usage.peopleRequests || 0)} 次呼叫`, '無法取得（未回傳適用配額與即時餘額）'],
-    ['白名單 / Google Sheets API', `${number(usage.sheetsReads || 0)} 次實際讀取（共用快取命中不計）`, '無法取得（未回傳專案配額餘額）'],
-    ['本程式 RPC / Cloud Run', `${number(usage.rpcRequests || 0)} 次已驗證請求`, '無法取得（Cloud Run 非固定的個人請求額度）']
+    ['Gemini ' + (result.model || ''), `${number(usage.geminiRequests)} 次本頁辨識；${tokens}`, '全專案費用請至 Google Cloud 帳單查看'],
+    ['Google Contacts / People API', `${number(window.NamecardPeople?.getRequestCount() || 0)} 次瀏覽器呼叫`, '無法取得（未回傳適用配額與即時餘額）'],
+    ['白名單 / Google Sheets', 'Apps Script 讀取並快取白名單', '無法取得即時剩餘額度'],
+    ['Apps Script', '登入驗證、白名單與 AI 辨識', '無法取得即時剩餘配額']
   ];
   debugUsageRows.replaceChildren();
   for (const values of rows) {
@@ -16604,9 +16610,7 @@ function switchGoogleAccount() {
   ) {
     return;
   }
-  window.top.location.href =
-    window.NAMECARD_CONFIG.API_BASE_URL +
-    '/auth/logout?switch=1';
+  window.NamecardAuth.signOut();
 }
 
 switchGoogleAccountButton.onclick =
@@ -16623,6 +16627,7 @@ retryAccountCheckButton.onclick =
   };
 
 checkCurrentGoogleAccount();
+window.addEventListener('namecard:account-changed', checkCurrentGoogleAccount);
 
 </script>
 
