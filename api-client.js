@@ -1,24 +1,29 @@
 (function () {
   'use strict';
-  const cfg = window.NAMECARD_CONFIG || {};
-  const base = String(cfg.API_BASE_URL || '').replace(/\/$/, '');
+  const peopleMethods = new Set([
+    'secureCheckDuplicateContacts',
+    'secureCreateGoogleContactWithOptionalPhoto',
+    'secureLoadExistingGoogleContact',
+    'secureGetExistingGoogleContactPhotoInfo',
+    'secureUpdateGoogleContactWithOptionalPhoto'
+  ]);
+  const usage = {startedAt: new Date().toISOString(), geminiRequests: 0,
+    geminiUsageReports: 0, geminiInputTokens: 0, geminiOutputTokens: 0, geminiTotalTokens: 0};
 
   async function rpc(method, args) {
-    const response = await fetch(base + '/api/rpc', {
-      method: 'POST',
-      credentials: 'include',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({method, args})
-    });
-    const data = await response.json().catch(() => ({}));
-    if (response.status === 401 && method !== 'getCurrentUserAccessStatus') {
-      window.location.href = base + '/auth/login';
-      throw new Error('登入已失效，正在重新登入。');
+    if (peopleMethods.has(method)) return window.NamecardPeople[method](...args);
+    const result = await window.NamecardGateway.invoke(method, args);
+    if (method === 'secureRecognizeBusinessCard') {
+      usage.geminiRequests++;
+      if (result?.usage?.totalTokens != null) {
+        usage.geminiUsageReports++;
+        usage.geminiInputTokens += Number(result.usage.inputTokens || 0);
+        usage.geminiOutputTokens += Number(result.usage.outputTokens || 0);
+        usage.geminiTotalTokens += Number(result.usage.totalTokens || 0);
+      }
     }
-    if (!response.ok || data.ok === false) {
-      throw new Error(data.error || ('HTTP ' + response.status));
-    }
-    return data.result;
+    if (method === 'getDebugUsageStatus') return {...result, usage: {...result.usage, ...usage}};
+    return result;
   }
 
   function runner() {
