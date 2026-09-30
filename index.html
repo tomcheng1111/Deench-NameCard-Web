@@ -2527,6 +2527,131 @@
       .dynamic-row, .dynamic-row-address, html.mobile-ui .dynamic-row, html.mobile-ui .dynamic-row-address { grid-template-columns: minmax(0, 1fr) 48px; }
       .dynamic-row > .field-remove, .dynamic-row-address > .field-remove { grid-column: 2; grid-row: 1; }
     }
+
+    /* Contact field controls use layout columns rather than overlay positioning. */
+    #contactEditor { --field-control-height: 52px; }
+    #contactEditor .field-group {
+      display: grid;
+      grid-template-columns: minmax(0, 85fr) minmax(0, 15fr);
+      gap: 6px;
+      padding: 0;
+      align-content: start;
+    }
+    #contactEditor .field-group[hidden], #contactEditor .notes-field[hidden] { display: none; }
+    #contactEditor .field-group > label { grid-column: 1 / -1; margin: 0; }
+    #contactEditor .field-group > input { grid-column: 1; grid-row: 2; }
+    #contactEditor .field-group > .field-remove { grid-column: 2; grid-row: 2; }
+    #contactEditor .field-remove {
+      position: static;
+      float: none;
+      width: 100%;
+      min-width: 0;
+      height: 100%;
+      min-height: var(--field-control-height);
+      margin: 0;
+      padding: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      align-self: stretch;
+      line-height: 1;
+      box-sizing: border-box;
+    }
+    #contactEditor .field-group > input,
+    #contactEditor .dynamic-row > input,
+    #contactEditor .dynamic-row > select,
+    #contactEditor .dynamic-row-address > input,
+    #contactEditor .dynamic-row-address > select,
+    #contactEditor .manual-field-main > input,
+    #contactEditor .manual-field-main > select {
+      width: 100%;
+      min-width: 0;
+      max-width: 100%;
+      height: var(--field-control-height);
+      min-height: var(--field-control-height);
+      margin: 0;
+      padding: 10px 8px;
+      box-sizing: border-box;
+      border: 1px solid #ccc;
+      border-radius: 7px;
+      background: #fff;
+      color: #222;
+      font: inherit;
+      font-size: 17px;
+    }
+    #contactEditor .dynamic-row,
+    #contactEditor .dynamic-row-address,
+    #contactEditor .manual-field-main {
+      display: grid;
+      grid-template-columns: minmax(0, 25fr) minmax(0, 60fr) minmax(0, 15fr);
+      gap: 8px;
+      padding: 0;
+      align-items: stretch;
+    }
+    #contactEditor .dynamic-row > select,
+    #contactEditor .dynamic-row-address > select { grid-column: 1; grid-row: 1; }
+    #contactEditor .dynamic-row > input,
+    #contactEditor .dynamic-row-address > input { grid-column: 2; grid-row: 1; }
+    #contactEditor .dynamic-row > .field-remove,
+    #contactEditor .dynamic-row-address > .field-remove { grid-column: 3; grid-row: 1; }
+    #contactEditor .phone-row {
+      grid-template-columns: minmax(0, 20fr) minmax(0, 55fr) minmax(0, 10fr) minmax(0, 15fr);
+    }
+    #contactEditor .phone-row > .phone-extension { grid-column: 3; grid-row: 1; }
+    #contactEditor .phone-row > .field-remove { grid-column: 4; grid-row: 1; }
+    #contactEditor .notes-input-row {
+      display: grid;
+      grid-template-columns: minmax(0, 85fr) minmax(0, 15fr);
+      gap: 8px;
+      align-items: stretch;
+    }
+    #contactEditor .notes-input-row textarea { width: 100%; min-width: 0; margin: 0; }
+    #contactEditor .add-field-controls { margin: 16px 0; }
+    #contactEditor .add-field-controls button { width: 100%; margin: 0; }
+    #additionalFieldsContainer { margin-top: 16px; }
+    #contactEditor .manual-field { margin-bottom: 12px; }
+    #contactEditor .manual-field-details {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      margin-top: 8px;
+      font-size: 15px;
+      color: #555;
+    }
+    #contactEditor .manual-field-details:empty { display: none; }
+    #contactEditor .manual-field-details select,
+    #contactEditor .manual-field-details input {
+      min-width: 0;
+      min-height: 44px;
+      max-width: 100%;
+      padding: 8px;
+      border: 1px solid #ccc;
+      border-radius: 7px;
+      font: inherit;
+      background: #fff;
+    }
+    html.mobile-ui #contactEditor { --field-control-height: calc(54px * var(--mobile-ui-scale, 1)); }
+    html.mobile-ui #contactEditor .phone-row { grid-template-columns: minmax(0, 25fr) minmax(0, 60fr) minmax(0, 15fr); }
+    html.mobile-ui #contactEditor .phone-row > .phone-extension { grid-column: 2; grid-row: 2; }
+    html.mobile-ui #contactEditor .phone-row > .field-remove { grid-column: 3; grid-row: 1; }
+    html.mobile-ui #contactEditor .field-group > input,
+    html.mobile-ui #contactEditor .dynamic-row > input,
+    html.mobile-ui #contactEditor .dynamic-row > select,
+    html.mobile-ui #contactEditor .dynamic-row-address > input,
+    html.mobile-ui #contactEditor .dynamic-row-address > select,
+    html.mobile-ui #contactEditor .manual-field-main > input,
+    html.mobile-ui #contactEditor .manual-field-main > select { font-size: calc(19px * var(--mobile-ui-scale, 1)); }
+
+    @media (max-width: 768px) {
+      #contactEditor .phone-row {
+        grid-template-columns: minmax(0, 25fr) minmax(0, 60fr) minmax(0, 15fr);
+      }
+      #contactEditor .phone-row > .phone-extension { grid-column: 2; grid-row: 2; }
+      #contactEditor .phone-row > .field-remove { grid-column: 3; grid-row: 1; }
+      #contactEditor .dynamic-row, #contactEditor .dynamic-row-address { gap: 6px; border: 0; background: transparent; }
+      #contactEditor .manual-field-main { gap: 6px; }
+    }
   </style>
 
 
@@ -3289,7 +3414,7 @@
     </div>
 
 
-    <div class="add-field-controls"><label for="newContactField">新增欄位</label><select id="newContactField"><option value="phones">電話／手機／傳真</option><option value="emails">Email</option><option value="addresses">地址</option><option value="websites">網站</option><option value="displayName">姓名</option><option value="familyName">姓氏</option><option value="givenName">名字</option><option value="organizationName">公司</option><option value="department">部門</option><option value="title">職稱</option><option value="notes">附註</option></select><button type="button" id="addContactFieldButton">＋ 新增欄位</button></div>
+
     <div class="form-grid">
 
       <div class="field-group">
@@ -3450,6 +3575,11 @@
       rows="16"
     ></textarea></div>
 
+
+    <div id="additionalFieldsContainer" aria-label="新增的聯絡人欄位"></div>
+    <div class="add-field-controls">
+      <button type="button" id="addContactFieldButton">＋ 新增欄位</button>
+    </div>
 
     <div class="step-actions">
 
@@ -12729,6 +12859,8 @@ function showEditor(
       'block';
 
 
+  document.getElementById('additionalFieldsContainer').replaceChildren();
+
   document.querySelectorAll('#contactEditor .field-group[hidden]').forEach(group => { group.hidden = false; });
   document.getElementById('notesFieldGroup').hidden = false;
 
@@ -12850,7 +12982,7 @@ function renderPhones(
 
 
       row.className =
-        'dynamic-row';
+        'dynamic-row phone-row';
 
 
       row.innerHTML = `
@@ -13114,7 +13246,9 @@ function attachFieldRemove(row, label) {
 const contactEditor = document.getElementById('contactEditor');
 contactEditor.querySelectorAll('.form-grid .field-group').forEach(group => {
   const input = group.querySelector('input');
-  const label = group.querySelector('label')?.textContent.trim() || '此';
+  const labelElement = group.querySelector('label');
+  if (labelElement && input) labelElement.htmlFor = input.id;
+  const label = labelElement?.textContent.trim() || '此';
   const button = document.createElement('button');
   button.type = 'button';
   button.className = 'field-remove';
@@ -13124,25 +13258,104 @@ contactEditor.querySelectorAll('.form-grid .field-group').forEach(group => {
   button.addEventListener('click', () => { input.value = ''; group.hidden = true; });
   group.appendChild(button);
 });
+const notesInputRow = document.createElement('div');
+notesInputRow.className = 'notes-input-row';
+const notesInput = document.getElementById('notes');
+notesInput.parentNode.insertBefore(notesInputRow, notesInput);
+notesInputRow.appendChild(notesInput);
+notesInputRow.appendChild(document.querySelector('[data-remove-notes]'));
 document.querySelector('[data-remove-notes]').addEventListener('click', () => {
   document.getElementById('notes').value = '';
   document.getElementById('notesFieldGroup').hidden = true;
 });
-document.getElementById('addContactFieldButton').addEventListener('click', () => {
-  const selection = document.getElementById('newContactField').value;
-  const renderers = {phones: renderPhones, emails: renderEmails, addresses: renderAddresses, websites: renderWebsites};
-  if (renderers[selection]) {
-    renderers[selection]([{type:'work', value:'', formattedValue:''}], true);
-    document.getElementById(selection + 'Container').lastElementChild?.querySelector('input')?.focus();
-  } else if (selection === 'notes') {
-    document.getElementById('notesFieldGroup').hidden = false;
-    document.getElementById('notes').focus();
-  } else {
-    const input = document.getElementById(selection);
-    const group = input?.closest('.field-group');
-    if (group) { group.hidden = false; input.focus(); }
-  }
-});
+const additionalFieldOptions = '<option value="phones">電話／手機／傳真</option><option value="emails">Email</option><option value="addresses">地址</option><option value="websites">網站</option><option value="displayName">姓名</option><option value="familyName">姓氏</option><option value="givenName">名字</option><option value="organizationName">公司</option><option value="department">部門</option><option value="title">職稱</option><option value="notes">附註</option>';
+const additionalScalarPaths = {
+  displayName: ['name', 'displayName'], familyName: ['name', 'familyName'],
+  givenName: ['name', 'givenName'], organizationName: ['organization', 'name'],
+  department: ['organization', 'department'], title: ['organization', 'title']
+};
+const additionalTypeLabels = {
+  phones: [['mobile','手機'],['work','公司電話'],['fax','傳真'],['other','其他']],
+  emails: [['work','公司'],['home','個人'],['other','其他']],
+  addresses: [['work','公司'],['home','個人'],['other','其他']],
+  websites: [['work','公司網站'],['profile','Profile'],['other','其他']]
+};
+function addContactField() {
+  const row = document.createElement('div');
+  row.className = 'manual-field';
+  row.innerHTML = '<div class="manual-field-main">' +
+    '<select class="manual-field-kind" aria-label="新增欄位資料類型">' + additionalFieldOptions + '</select>' +
+    '<input class="manual-field-value" type="text" aria-label="新增欄位內容" placeholder="輸入內容">' +
+    '<button type="button" class="field-remove" aria-label="刪除新增欄位" title="刪除新增欄位">×</button>' +
+    '</div><div class="manual-field-details"></div>';
+  const kind = row.querySelector('.manual-field-kind');
+  const input = row.querySelector('.manual-field-value');
+  const details = row.querySelector('.manual-field-details');
+  kind.addEventListener('change', () => {
+    details.replaceChildren();
+    const selected = kind.options[kind.selectedIndex].text;
+    input.setAttribute('aria-label', kind.value ? selected + '內容' : '新增欄位內容');
+    input.placeholder = kind.value ? '輸入' + selected : '輸入內容';
+    if (additionalTypeLabels[kind.value]) {
+      const label = document.createElement('label');
+      label.textContent = '標籤 ';
+      const subtype = document.createElement('select');
+      subtype.className = 'manual-field-subtype';
+      subtype.setAttribute('aria-label', selected + '標籤');
+      for (const [value, text] of additionalTypeLabels[kind.value]) {
+        const option = document.createElement('option');
+        option.value = value; option.textContent = text; subtype.appendChild(option);
+      }
+      subtype.value = 'work';
+      label.appendChild(subtype); details.appendChild(label);
+      if (kind.value === 'phones') {
+        const extension = document.createElement('input');
+        extension.className = 'manual-field-extension';
+        extension.placeholder = '分機（選填）';
+        extension.setAttribute('aria-label', '新增電話分機');
+        details.appendChild(extension);
+      }
+    } else if (additionalScalarPaths[kind.value]) {
+      details.textContent = '同類欄位已有內容時，新增的補充資料會保留在附註。';
+    }
+    input.focus();
+  });
+  row.querySelector('.field-remove').addEventListener('click', () => row.remove());
+  document.getElementById('additionalFieldsContainer').appendChild(row);
+  kind.dispatchEvent(new Event('change'));
+  kind.focus();
+}
+document.getElementById('addContactFieldButton').addEventListener('click', addContactField);
+
+function collectAdditionalFields(result) {
+  const appendNote = text => {
+    result.finalBiography = [result.finalBiography, text].filter(Boolean).join('\n');
+  };
+  document.querySelectorAll('#additionalFieldsContainer .manual-field').forEach(row => {
+    const kind = row.querySelector('.manual-field-kind').value;
+    const value = row.querySelector('.manual-field-value').value.trim();
+    if (!value) return;
+    if (!kind) { appendNote(value); return; }
+    const type = row.querySelector('.manual-field-subtype')?.value || 'work';
+    if (kind === 'phones') {
+      result.phones.push({type, value, extension: row.querySelector('.manual-field-extension')?.value.trim() || '', confidence: 1});
+    } else if (kind === 'emails' || kind === 'websites') {
+      result[kind].push({type, value, confidence: 1});
+    } else if (kind === 'addresses') {
+      result.addresses.push({type, formattedValue: value, confidence: 1});
+    } else if (kind === 'notes') {
+      appendNote(value);
+    } else if (additionalScalarPaths[kind]) {
+      const [group, field] = additionalScalarPaths[kind];
+      if (!result[group][field]) result[group][field] = value;
+      else if (result[group][field] !== value) {
+        const select = row.querySelector('.manual-field-kind');
+        appendNote(select.options[select.selectedIndex].text + '：' + value);
+      }
+    }
+  });
+  return result;
+}
 
 /* ==================================================
  * Collect
@@ -13382,7 +13595,7 @@ function collectEditedContact() {
     );
 
 
-  return result;
+  return collectAdditionalFields(result);
 
 }
 
@@ -15932,6 +16145,8 @@ function showWarnings(
  * ================================================== */
 
 function clearRecognitionResult() {
+  document.getElementById('additionalFieldsContainer').replaceChildren();
+
 
   currentContact =
     null;
@@ -16647,3 +16862,4 @@ window.addEventListener('namecard:account-changed', checkCurrentGoogleAccount);
 </body>
 
 </html>
+
