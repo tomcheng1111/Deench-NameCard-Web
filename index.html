@@ -12622,6 +12622,19 @@ function classifyRecognitionFailure(
 
 
   if (
+    /(?:http\s*)?402|prepayment credits are depleted|payment_required/i.test(text)
+  ) {
+    return {
+      code: 'billing_required',
+      statusText: 'Gemini 預付額度不足',
+      userMessage:
+        'Gemini 回報預付額度不足，目前無法辨識名片。\n\n' +
+        '請由管理員確認金鑰所屬專案的計費狀態或可用的免費方案金鑰；此問題不會因稍後重試而恢復。\n\n' +
+        '已保留目前的名片圖片與校正結果。'
+    };
+  }
+
+  if (
     /(?:http\s*)?429|resource_exhausted|quota|rate.?limit|too many requests|exceeded.*(?:quota|limit)/i.test(
       text
     )
