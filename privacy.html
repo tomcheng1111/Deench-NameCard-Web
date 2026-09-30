@@ -20,11 +20,11 @@
 <nav><a href="/">返回 Deench AI Business Card 首頁</a></nav>
 <main>
 <h1>隱私權政策</h1>
-<p class="muted">Deench AI Business Card（名片辨識服務）｜更新日期：2026 年 9 月 28 日</p>
+<p class="muted">Deench AI Business Card（名片辨識服務）｜更新日期：2026 年 9 月 29 日</p>
 <p>本服務讓獲准使用的 Google 帳號上傳名片影像、使用 AI 辨識與核對資料，並在使用者確認後搜尋、新增或更新<strong>該登入帳號自己的</strong> Google 聯絡人。本政策說明此過程如何處理資料。</p>
 <h2>一、處理的資料</h2>
 <ul>
-<li>登入識別資料：Google 帳號電子郵件、名稱、OAuth 授權權杖及登入工作階段資料。</li>
+<li>登入識別資料：Google 帳號電子郵件及登入所用的短期 ID token；聯絡人 OAuth 短期權杖僅存在瀏覽器記憶體。</li>
 <li>存取資格：用於檢查公司網域，以及管理者於指定 Google 試算表維護的外部使用者電子郵件與姓名白名單。</li>
 <li>名片資料：您上傳的正反面照片、影像處理結果、AI 辨識文字、您修改後的聯絡人欄位與選擇使用的頭像。</li>
 <li>服務運作資料：本次登入工作階段的請求次數及 AI 用量資訊；基礎設施可能產生請求與錯誤紀錄。</li>
@@ -32,15 +32,15 @@
 <h2>二、資料如何使用</h2>
 <ul>
 <li>驗證帳號與白名單，確保只有公司網域使用者或經許可的外部帳號可操作。</li>
-<li>在瀏覽器處理與校正影像；當您執行 AI 辨識，影像與必要指示會經本服務後端傳送至 Google Cloud Vertex AI，以產生可供檢查的名片欄位。</li>
-<li>經您的 Google OAuth 授權後，透過 Google People API 查詢可能重複的聯絡人；僅在您確認後，新增或更新登入帳號的 Google 聯絡人，並依您的選擇附上頭像。</li>
-<li>維持登入狀態、提供錯誤排除與服務用量顯示。</li>
+<li>在瀏覽器處理與校正影像；當您執行 AI 辨識，影像與必要指示會經 Google Apps Script 傳送至 Gemini Developer API，以產生可供檢查的名片欄位。</li>
+<li>經您的 Google OAuth 授權後，由瀏覽器直接透過 Google People API 查詢可能重複的聯絡人；僅在您確認後，新增或更新登入帳號的 Google 聯絡人，並依您的選擇附上頭像。聯絡人權杖及聯絡人內容不透過本服務後端代理。</li>
+<li>在目前開啟的網頁維持登入狀態，提供錯誤排除與可取得的服務用量資訊。</li>
 </ul>
 <h2>三、權限與服務提供者</h2>
-<p>本服務要求基本帳號識別權限（openid、email、profile）與 Google 聯絡人權限（<code>https://www.googleapis.com/auth/contacts</code>），用於上述登入、查詢、新增和更新功能。白名單由本服務的專用服務帳號讀取；此權限不授予其他使用者操作您的聯絡人。</p>
-<p>網站由 GitHub Pages 提供，後端使用 Google Cloud Run；名片辨識使用 Google Cloud Vertex AI，聯絡人資料由 Google People API 處理。影像校正功能可能載入 OpenCV 的公開程式資源。這些服務可能依其自身政策處理必要的連線資訊。本服務不會將 Google 聯絡人資料出售或提供作廣告用途。</p>
+<p>本服務使用 Google 帳號識別資訊與 Google 聯絡人權限（<code>https://www.googleapis.com/auth/contacts</code>），用於上述登入、查詢、新增和更新功能。白名單由 Google Apps Script 以部署者權限讀取；此權限不授予其他使用者操作您的聯絡人。</p>
+<p>網站由 GitHub Pages 提供；後端使用 Google Apps Script，名片辨識使用 Gemini Developer API，聯絡人資料由 Google People API 處理。影像校正功能可能載入 OpenCV 的公開程式資源。這些服務可能依其自身政策處理必要的連線資訊。本服務不會將 Google 聯絡人資料出售或提供作廣告用途。</p>
 <h2>四、保存與安全</h2>
-<p>OAuth 工作階段使用加密、僅限 HTTPS 傳送且無法由 JavaScript 讀取的 Cookie；目前設定有效期間最長為 30 天，您可清除瀏覽器網站資料或撤銷 Google 帳號授權來停止後續存取。服務不另設名片影像長期保存庫；影像在操作期間於瀏覽器和後端處理，並依上文傳送至 Google Cloud Vertex AI。服務的基礎設施可能依其設定保存必要的運作或錯誤紀錄。</p>
+<p>登入 ID token 與聯絡人短期權杖僅在瀏覽器記憶體使用；Apps Script 每次驗證登入憑證，並不保存聯絡人權杖。重新整理網頁後需要重新選擇帳號。您可撤銷 Google 帳號授權來停止後續存取。服務不另設名片影像長期保存庫；影像在操作期間於瀏覽器和 Apps Script 處理，並依上文傳送至 Gemini Developer API。基礎設施可能依其設定保存必要的運作或錯誤紀錄。</p>
 <p>您確認新增或更新的聯絡人會儲存在您自己的 Google 聯絡人中，直到您透過 Google 聯絡人管理。登出或撤銷授權不會自動刪除已匯入的聯絡人。</p>
 <h2>五、您的選擇與聯絡方式</h2>
 <p>辨識後可檢視和修改資料；您可以選擇不匯入，或在 Google 帳號的「第三方應用程式與服務」撤銷授權。若要查詢本服務如何處理資料或提出更正要求，請寄信至 <a href="mailto:thomas@deench.com.tw">thomas@deench.com.tw</a>。</p>
